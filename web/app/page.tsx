@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import GlowButton from "./components/GlowButton";
 import Panel from "./components/Panel";
 import CaptureButton from "./components/CaptureButton";
@@ -23,6 +23,7 @@ export default function Page() {
   const [trackHash, setTrackHash] = useState<string>("");
   const [tracked, setTracked] = useState<Any>(null);
   const [error, setError] = useState<ErrState>(null);
+  const [syncStatus, setSyncStatus] = useState<Any>(null);
 
   const stages = useMemo(
     () => ({
@@ -34,6 +35,17 @@ export default function Page() {
     }),
     [delivered, finality, headers, mempool, received]
   );
+
+  // Fetch sync status on component mount
+  React.useEffect(() => {
+    const fetchSyncStatus = async () => {
+      const result = await safeFetch("/api/sync-status");
+      if (result) {
+        setSyncStatus(result);
+      }
+    };
+    fetchSyncStatus();
+  }, []);
 
   async function safeFetch(url: string, init?: RequestInit) {
     setError(null);
@@ -120,16 +132,37 @@ export default function Page() {
         </p>
         
         {/* Sync Status */}
-        <div className="bg-yellow-400/10 border border-yellow-400/30 rounded-lg p-4 text-center">
-          <div className="text-yellow-200 font-semibold mb-2">⚠️ Services Syncing</div>
-          <div className="text-yellow-100 text-sm space-y-1">
-            <div>• <strong>Geth</strong>: Syncing mainnet blockchain (2-4 hours)</div>
-            <div>• <strong>Lighthouse</strong>: Syncing consensus layer (~30 minutes)</div>
-            <div className="text-xs mt-2 opacity-75">
-              Buttons will work once sync completes. Check progress: <code className="bg-black/30 px-1 rounded">docker logs geth</code>
+        {syncStatus && (
+          <div className={`border rounded-lg p-4 text-center ${
+            syncStatus.geth?.synced && syncStatus.lighthouse?.synced 
+              ? 'bg-green-400/10 border-green-400/30' 
+              : 'bg-yellow-400/10 border-yellow-400/30'
+          }`}>
+            <div className={`font-semibold mb-2 ${
+              syncStatus.geth?.synced && syncStatus.lighthouse?.synced 
+                ? 'text-green-200' 
+                : 'text-yellow-200'
+            }`}>
+              {syncStatus.geth?.synced && syncStatus.lighthouse?.synced 
+                ? '✅ Services Ready' 
+                : '⚠️ Services Syncing'
+              }
+            </div>
+            <div className={`text-sm space-y-1 ${
+              syncStatus.geth?.synced && syncStatus.lighthouse?.synced 
+                ? 'text-green-100' 
+                : 'text-yellow-100'
+            }`}>
+              <div>• <strong>Geth</strong>: {syncStatus.geth?.synced ? 'Synced ✅' : 'Syncing mainnet blockchain (2-4 hours)'}</div>
+              <div>• <strong>Lighthouse</strong>: {syncStatus.lighthouse?.synced ? 'Synced ✅' : 'Syncing consensus layer (~30 minutes)'}</div>
+              {!(syncStatus.geth?.synced && syncStatus.lighthouse?.synced) && (
+                <div className="text-xs mt-2 opacity-75">
+                  Buttons will work once sync completes. Check progress: <code className="bg-black/30 px-1 rounded">docker logs geth</code>
+                </div>
+              )}
             </div>
           </div>
-        </div>
+        )}
       </header>
 
       {error ? <Alert title={error.title} message={error.message} hint={error.hint} /> : null}

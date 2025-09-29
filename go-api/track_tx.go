@@ -23,7 +23,7 @@ func parseHexUint64(h string) (uint64, error) {
 }
 
 func handleTrackTx(w http.ResponseWriter, r *http.Request) {
-    hash := r.PathValue("hash")
+    hash := r.URL.Path[len("/api/track/tx/"):]
     if hash == "" {
         writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "Missing transaction hash", "Invoke /api/track/tx/{hash}")
         return
