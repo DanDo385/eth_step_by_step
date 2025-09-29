@@ -23,7 +23,6 @@ export default function Page() {
   const [trackHash, setTrackHash] = useState<string>("");
   const [tracked, setTracked] = useState<Any>(null);
   const [error, setError] = useState<ErrState>(null);
-  const [syncStatus, setSyncStatus] = useState<Any>(null);
 
   const stages = useMemo(
     () => ({
@@ -36,16 +35,6 @@ export default function Page() {
     [delivered, finality, headers, mempool, received]
   );
 
-  // Fetch sync status on component mount
-  React.useEffect(() => {
-    const fetchSyncStatus = async () => {
-      const result = await safeFetch("/api/sync-status");
-      if (result) {
-        setSyncStatus(result);
-      }
-    };
-    fetchSyncStatus();
-  }, []);
 
   async function safeFetch(url: string, init?: RequestInit) {
     setError(null);
@@ -68,14 +57,14 @@ export default function Page() {
         let errorHint = errPayload.hint;
         
         if (errPayload.kind === "TXPOOL") {
-          errorMessage = "Geth is still syncing - mempool data not available yet";
-          errorHint = "Wait for Geth to finish syncing (2-4 hours). Check sync progress with: docker logs geth";
+          errorMessage = "Mempool data not available from public RPC";
+          errorHint = "Public RPC providers may not expose txpool APIs. Try using a different RPC endpoint.";
         } else if (errPayload.kind === "RELAY") {
           errorMessage = "Relay API temporarily unavailable";
           errorHint = "This is normal - public relays may be rate limiting. Try again in a few minutes.";
         } else if (errPayload.kind === "BEACON") {
-          errorMessage = "Lighthouse is still syncing - consensus data not available yet";
-          errorHint = "Wait for Lighthouse to finish checkpoint sync (~30 minutes).";
+          errorMessage = "Beacon API temporarily unavailable";
+          errorHint = "Public beacon API may be rate limiting. Try again in a few minutes.";
         }
         
         setError({
@@ -90,7 +79,7 @@ export default function Page() {
       setError({ 
         title: "Network error", 
         message: err instanceof Error ? err.message : String(err),
-        hint: "Check if all services are running: docker compose ps"
+        hint: "Check if the Go API server is running on localhost:8080"
       });
       return null;
     }
@@ -131,38 +120,19 @@ export default function Page() {
           beacon APIs fill in the gaps your execution client cannot show on its own.
         </p>
         
-        {/* Sync Status */}
-        {syncStatus && (
-          <div className={`border rounded-lg p-4 text-center ${
-            syncStatus.geth?.synced && syncStatus.lighthouse?.synced 
-              ? 'bg-green-400/10 border-green-400/30' 
-              : 'bg-yellow-400/10 border-yellow-400/30'
-          }`}>
-            <div className={`font-semibold mb-2 ${
-              syncStatus.geth?.synced && syncStatus.lighthouse?.synced 
-                ? 'text-green-200' 
-                : 'text-yellow-200'
-            }`}>
-              {syncStatus.geth?.synced && syncStatus.lighthouse?.synced 
-                ? '✅ Services Ready' 
-                : '⚠️ Services Syncing'
-              }
-            </div>
-            <div className={`text-sm space-y-1 ${
-              syncStatus.geth?.synced && syncStatus.lighthouse?.synced 
-                ? 'text-green-100' 
-                : 'text-yellow-100'
-            }`}>
-              <div>• <strong>Geth</strong>: {syncStatus.geth?.synced ? 'Synced ✅' : 'Syncing mainnet blockchain (2-4 hours)'}</div>
-              <div>• <strong>Lighthouse</strong>: {syncStatus.lighthouse?.synced ? 'Synced ✅' : 'Syncing consensus layer (~30 minutes)'}</div>
-              {!(syncStatus.geth?.synced && syncStatus.lighthouse?.synced) && (
-                <div className="text-xs mt-2 opacity-75">
-                  Buttons will work once sync completes. Check progress: <code className="bg-black/30 px-1 rounded">docker logs geth</code>
-                </div>
-              )}
+        {/* Status */}
+        <div className="border rounded-lg p-4 text-center bg-green-400/10 border-green-400/30">
+          <div className="font-semibold mb-2 text-green-200">
+            ✅ Services Ready
+          </div>
+          <div className="text-sm space-y-1 text-green-100">
+            <div>• <strong>Ethereum RPC</strong>: Connected to Alchemy (public)</div>
+            <div>• <strong>Beacon API</strong>: Connected to Beaconcha.in (public)</div>
+            <div className="text-xs mt-2 opacity-75">
+              All data is fetched from public APIs - no local blockchain sync required!
             </div>
           </div>
-        )}
+        </div>
       </header>
 
       {error ? <Alert title={error.title} message={error.message} hint={error.hint} /> : null}

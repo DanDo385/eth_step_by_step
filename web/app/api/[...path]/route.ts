@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const GOAPI_ORIGIN = process.env.GOAPI_ORIGIN || 'http://goapi:8080';
+const GOAPI_ORIGIN = process.env.GOAPI_ORIGIN || 'http://localhost:8080';
 
 export async function GET(
   request: NextRequest,

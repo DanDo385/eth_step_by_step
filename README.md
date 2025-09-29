@@ -8,21 +8,22 @@ An educational tool that visualizes the journey of Ethereum transactions from me
 - **Interactive Diagram**: Mermaid-based visualization that lights up as data flows through each stage
 - **MEV Detection**: Sandwich attack detection using Uniswap V2/V3 heuristics
 - **Educational Tooltips**: Built-in glossary and explanations for complex concepts
-- **Real-time Data**: Live data from Geth, Lighthouse, and Flashbots relays
+- **Real-time Data**: Live data from public Ethereum APIs (Alchemy, Beaconcha.in, Flashbots)
 - **Responsive UI**: Dark/light theme toggle with accessibility features
 
 ## Architecture
 
 - **Go API**: Handles all Ethereum data fetching and processing
 - **Next.js Frontend**: Modern React-based UI with TypeScript
-- **Docker Compose**: Orchestrates all services (Geth, Lighthouse, API, Web)
+- **Public APIs**: Uses Alchemy for Ethereum RPC and Beaconchain for consensus data
 
 ## Quick Start
 
 ### Prerequisites
 
-- Docker and Docker Compose
-- macOS (tested on macOS 24.6.0)
+- Go 1.21+ (for the API server)
+- Node.js 18+ (for the web frontend)
+- macOS/Linux/Windows
 
 ### Setup
 
@@ -31,33 +32,43 @@ An educational tool that visualizes the journey of Ethereum transactions from me
    cd /Users/danmagro/Desktop/Code/portfolio_projects/eth_step_by_step
    ```
 
-2. **Start all services**:
+2. **Install dependencies**:
    ```bash
-   docker compose up -d --build
+   # Install Go dependencies
+   cd go-api
+   go mod tidy
+   cd ..
+   
+   # Install Node.js dependencies
+   cd web
+   npm install
+   cd ..
    ```
 
-3. **Access the application**:
+3. **Start the services** (in separate terminals):
+   ```bash
+   # Terminal 1: Start Go API server
+   ./start-go-api.sh
+   
+   # Terminal 2: Start Next.js web server
+   ./start-web.sh
+   ```
+
+4. **Access the application**:
    - **Web UI**: http://localhost:3000
    - **Go API**: http://localhost:8080
-   - **Geth RPC**: http://localhost:8545
-   - **Lighthouse**: http://localhost:5052
 
-### Initial Sync
+### No Blockchain Sync Required!
 
-The services will take time to sync:
-- **Geth**: ~2-4 hours for mainnet sync
-- **Lighthouse**: ~30 minutes for checkpoint sync
-
-You can monitor progress with:
-```bash
-docker logs geth --tail 20
-docker logs lighthouse --tail 20
-```
+This version uses public APIs, so there's no need to sync a local blockchain:
+- **Ethereum RPC**: Alchemy (public endpoint)
+- **Beacon API**: Beaconcha.in (public endpoint)
+- **Relay Data**: Flashbots public relays
 
 ## Usage
 
 ### 1. Mempool Data
-Click "1) Mempool" to see pending transactions from your local Geth node.
+Click "1) Mempool" to see pending transactions from the public mempool.
 
 ### 2. PBS (Proposer-Builder Separation)
 - "2) Builders → Relays" shows which builders submit blocks to relays
@@ -75,7 +86,7 @@ Use the sandwich detector to analyze blocks for potential MEV attacks.
 
 ## API Endpoints
 
-- `GET /api/mempool` - Geth mempool data
+- `GET /api/mempool` - Mempool data from public RPC
 - `GET /api/relays/received` - Builder blocks received by relays
 - `GET /api/relays/delivered` - Payloads delivered to proposers
 - `GET /api/validators/head` - Beacon chain headers
@@ -91,62 +102,61 @@ This tool demonstrates:
 2. **PBS Architecture**: How MEV-Boost works off-chain
 3. **Consensus Mechanics**: Casper-FFG finality process
 4. **MEV Detection**: Real-world sandwich attack patterns
-5. **API Integration**: How different Ethereum clients work together
+5. **API Integration**: How different Ethereum services work together
 
 ## Development
 
 ### Project Structure
 
 ```
-├── docker-compose.yml          # Service orchestration
-├── .env                        # Environment variables
-├── jwt/                        # JWT secrets for Geth-Lighthouse
 ├── go-api/                     # Go backend service
 │   ├── main.go                # HTTP routes and handlers
-│   ├── eth_rpc.go             # Geth JSON-RPC client
+│   ├── eth_rpc.go             # Ethereum JSON-RPC client
 │   ├── relay.go               # Flashbots relay client
-│   ├── beacon.go              # Lighthouse beacon client
+│   ├── beacon.go              # Beacon chain client
 │   ├── sandwich.go            # MEV detection logic
 │   └── track_tx.go            # Transaction tracking
-└── web/                       # Next.js frontend
-    ├── app/
-    │   ├── page.tsx           # Main application
-    │   ├── layout.tsx         # Root layout
-    │   └── components/        # React components
-    └── package.json           # Dependencies
+├── web/                       # Next.js frontend
+│   ├── app/
+│   │   ├── page.tsx           # Main application
+│   │   ├── layout.tsx         # Root layout
+│   │   └── components/        # React components
+│   └── package.json           # Dependencies
+├── start-go-api.sh            # Start Go API server
+└── start-web.sh               # Start Next.js server
 ```
+
+### Environment Variables
+
+The application uses these default public endpoints:
+- `RPC_HTTP_URL`: https://eth-mainnet.g.alchemy.com/v2/demo
+- `BEACON_API_URL`: https://beaconcha.in/api/v1
+- `RELAY_URLS`: https://boost-relay.flashbots.net
+
+You can override these by setting environment variables before starting the services.
 
 ### Stopping Services
 
-```bash
-docker compose down
-```
-
-### Viewing Logs
-
-```bash
-docker compose logs -f [service_name]
-```
+Use `Ctrl+C` in each terminal to stop the services.
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **"Failed to query txpool_*"**: Geth is still syncing
+1. **"Mempool data not available"**: Public RPC may not expose txpool APIs
 2. **"Relay fetch failed"**: Network connectivity or rate limiting
-3. **"Beacon fetch failed"**: Lighthouse is still syncing
+3. **"Beacon API temporarily unavailable"**: Public API may be rate limiting
 
 ### Checking Service Status
 
-```bash
-docker compose ps
-```
+- Go API: http://localhost:8080/api/mempool
+- Web UI: http://localhost:3000
 
-### Restarting Services
+### Port Conflicts
 
-```bash
-docker compose restart [service_name]
-```
+If ports 3000 or 8080 are in use:
+- Go API: Set `GOAPI_ADDR` (or `PORT`) in `.env.local`, e.g. `GOAPI_ADDR=:8081`, and update `GOAPI_ORIGIN` accordingly (e.g. `http://localhost:8081`). Then restart the servers.
+- Web UI: Change the dev port in `web/package.json` scripts if needed.
 
 ## Contributing
 
@@ -155,6 +165,7 @@ This is an educational project. Feel free to:
 - Improve the UI/UX
 - Add more educational content
 - Optimize performance
+- Add support for other RPC providers
 
 ## License
 
