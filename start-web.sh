@@ -1,3 +1,4 @@
+# start-web.sh
 #!/bin/bash
 
 set -euo pipefail
@@ -18,7 +19,15 @@ else
   echo "No .env.local found at repo root; using defaults."
 fi
 
+# Determine desired web port (defaults to 3000). Fail if busy to encourage freeing 3000.
+DESIRED_PORT=${WEB_PORT:-3000}
+if lsof -nP -iTCP:${DESIRED_PORT} -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "ERROR: Port ${DESIRED_PORT} is in use. Please free it or set WEB_PORT to a different port in .env.local."
+  exit 1
+fi
+
 # Start the Next.js web server
-echo "Starting Next.js web server on localhost:3000..."
+echo "Starting Next.js web server on localhost:${DESIRED_PORT}..."
 cd "$SCRIPT_DIR/web"
-npm run dev
+# Use local Next.js binary directly so we can pass the chosen port
+npx next dev -p "${DESIRED_PORT}"

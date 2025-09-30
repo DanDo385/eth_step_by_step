@@ -1,3 +1,4 @@
+// web/app/page.tsx
 "use client";
 
 import React, { useMemo, useState } from "react";
@@ -22,17 +23,23 @@ export default function Page() {
   const [mevBlock, setMevBlock] = useState<string>("latest");
   const [trackHash, setTrackHash] = useState<string>("");
   const [tracked, setTracked] = useState<Any>(null);
+  const [trackLoading, setTrackLoading] = useState(false);
   const [error, setError] = useState<ErrState>(null);
+  const [lastSnapAt, setLastSnapAt] = useState<number>(0);
+  const SNAP_TTL_MS = 30_000; // 30s client-side throttle
+
+  // Active panel - only one can be shown at a time
+  const [activePanel, setActivePanel] = useState<string | null>(null);
 
   const stages = useMemo(
     () => ({
-      mempool: Boolean(mempool),
-      pbs: Boolean(received) || Boolean(delivered),
-      relays: Boolean(delivered),
-      proposal: Boolean(headers),
-      finality: Boolean(finality)
+      mempool: activePanel === "mempool",
+      pbs: activePanel === "received" || activePanel === "delivered",
+      relays: activePanel === "received" || activePanel === "delivered",
+      proposal: activePanel === "headers",
+      finality: activePanel === "finality"
     }),
-    [delivered, finality, headers, mempool, received]
+    [activePanel]
   );
 
 
@@ -76,13 +83,50 @@ export default function Page() {
       }
       return payload;
     } catch (err) {
-      setError({ 
-        title: "Network error", 
+      setError({
+        title: "Network error",
         message: err instanceof Error ? err.message : String(err),
-        hint: "Check if the Go API server is running on localhost:8080"
+        hint: "Ensure the Go API is reachable (default http://localhost:8081)"
       });
       return null;
     }
+  }
+
+  async function loadSnapshot(includeSandwich = false, block?: string) {
+    // Client-side throttle to avoid excessive calls
+    const now = Date.now();
+    if (now - lastSnapAt < SNAP_TTL_MS) {
+      return; // use existing state
+    }
+    const qs = new URLSearchParams();
+    if (includeSandwich) {
+      qs.set("sandwich", "1");
+      qs.set("block", block || mempool?.lastBlock || "latest");
+    }
+    const result = await safeFetch(`/api/snapshot${qs.toString() ? '?' + qs.toString() : ''}`);
+    if (!result) return;
+    const d = result.data ?? result;
+    // Mempool
+    if (d.mempool) {
+      setMempool(d.mempool);
+    }
+    // Relays
+    if (d.relays) {
+      const receivedBlocks = d.relays.received ?? [];
+      const deliveredPayloads = d.relays.delivered ?? [];
+      setReceived({ data: { received_blocks: receivedBlocks, count: receivedBlocks.length } });
+      setDelivered({ data: { delivered_payloads: deliveredPayloads, count: deliveredPayloads.length } });
+    }
+    // Beacon
+    if (d.beacon) {
+      if (d.beacon.headers) setHeaders(d.beacon.headers);
+      if (d.beacon.finality) setFinality(d.beacon.finality);
+    }
+    // MEV (optional)
+    if (d.mev) {
+      setMev({ data: d.mev });
+    }
+    setLastSnapAt(now);
   }
 
   const highlightTx = (hash: string) => {
@@ -138,57 +182,105 @@ export default function Page() {
       {error ? <Alert title={error.title} message={error.message} hint={error.hint} /> : null}
 
       <div className="grid gap-4 grid-cols-1 md:grid-cols-3" role="group" aria-label="Data fetch controls">
-        <GlowButton ariaLabel="Fetch mempool" onClick={async () => {
-          const result = await safeFetch("/api/mempool");
-          if (result) {
-            setMempool(result.data ?? result);
-          }
-        }}>
+        <GlowButton
+          ariaLabel="Toggle mempool"
+          onClick={async () => {
+            if (activePanel === "mempool") {
+              setActivePanel(null);
+            } else {
+              if (!mempool) {
+                await loadSnapshot(false);
+              }
+              setActivePanel("mempool");
+            }
+          }}
+          className={activePanel === "mempool" ? "ring-2 ring-blue-500" : ""}
+        >
           1) Mempool
         </GlowButton>
 
-        <GlowButton ariaLabel="Fetch builder blocks received" onClick={async () => {
-          const result = await safeFetch("/api/relays/received?limit=25");
-          if (result) {
-            setReceived(result);
-          }
-        }}>
+        <GlowButton
+          ariaLabel="Toggle builder blocks received"
+          onClick={async () => {
+            if (activePanel === "received") {
+              setActivePanel(null);
+            } else {
+              if (!received) {
+                await loadSnapshot(false);
+              }
+              setActivePanel("received");
+            }
+          }}
+          className={activePanel === "received" ? "ring-2 ring-blue-500" : ""}
+        >
           2) Builders → Relays (received)
         </GlowButton>
 
-        <GlowButton ariaLabel="Fetch delivered payloads" onClick={async () => {
-          const result = await safeFetch("/api/relays/delivered?limit=25");
-          if (result) {
-            setDelivered(result);
-          }
-        }}>
+        <GlowButton
+          ariaLabel="Toggle delivered payloads"
+          onClick={async () => {
+            if (activePanel === "delivered") {
+              setActivePanel(null);
+            } else {
+              if (!delivered) {
+                await loadSnapshot(false);
+              }
+              setActivePanel("delivered");
+            }
+          }}
+          className={activePanel === "delivered" ? "ring-2 ring-blue-500" : ""}
+        >
           3) Relays → Validators (delivered)
         </GlowButton>
 
-        <GlowButton ariaLabel="Fetch beacon headers" onClick={async () => {
-          const result = await safeFetch("/api/validators/head");
-          if (result) {
-            setHeaders(result);
-          }
-        }}>
-          4) Proposed blocks (headers)
+        <GlowButton
+          ariaLabel="Toggle beacon headers"
+          onClick={async () => {
+            if (activePanel === "headers") {
+              setActivePanel(null);
+            } else {
+              if (!headers) {
+                await loadSnapshot(false);
+              }
+              setActivePanel("headers");
+            }
+          }}
+          className={activePanel === "headers" ? "ring-2 ring-blue-500" : ""}
+        >
+          4) Proposed blocks + Builder payments
         </GlowButton>
 
-        <GlowButton ariaLabel="Fetch finality checkpoints" onClick={async () => {
-          const result = await safeFetch("/api/finality");
-          if (result) {
-            setFinality(result);
-          }
-        }}>
+        <GlowButton
+          ariaLabel="Toggle finality checkpoints"
+          onClick={async () => {
+            if (activePanel === "finality") {
+              setActivePanel(null);
+            } else {
+              if (!finality) {
+                await loadSnapshot(false);
+              }
+              setActivePanel("finality");
+            }
+          }}
+          className={activePanel === "finality" ? "ring-2 ring-blue-500" : ""}
+        >
           5) Finality checkpoints
         </GlowButton>
 
-        <GlowButton ariaLabel="Analyze sandwiches" onClick={async () => {
-          const result = await safeFetch(`/api/mev/sandwich?block=${encodeURIComponent(mevBlock || "latest")}`);
-          if (result) {
-            setMev(result);
-          }
-        }}>
+        <GlowButton
+          ariaLabel="Toggle sandwich detector"
+          onClick={async () => {
+            if (activePanel === "mev") {
+              setActivePanel(null);
+            } else {
+              if (!mev) {
+                await loadSnapshot(true, mevBlock || "latest");
+              }
+              setActivePanel("mev");
+            }
+          }}
+          className={activePanel === "mev" ? "ring-2 ring-blue-500" : ""}
+        >
           6) Sandwich detector
         </GlowButton>
       </div>
@@ -211,7 +303,10 @@ export default function Page() {
               setError({ title: "Validation", message: "Enter a transaction hash" });
               return;
             }
+            setTracked(null);
+            setTrackLoading(true);
             const result = await safeFetch(`/api/track/tx/${trackHash}`);
+            setTrackLoading(false);
             if (result) {
               setTracked(result);
             }
@@ -221,144 +316,162 @@ export default function Page() {
           <CaptureButton targetId="panel-tracker" />
         </div>
         <div className="mt-3 overflow-auto max-h-96 text-xs bg-black/40 p-3 rounded-lg border border-white/10">
-          {tracked ? <pre>{JSON.stringify(tracked, null, 2)}</pre> : "Enter a hash and click Track."}
-        </div>
-      </Panel>
-
-      <Panel id="panel-mempool" title="Mempool (public txs seen by your Geth)">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-          <p className="text-white/70">
-            Execution-layer mempool data from <code>txpool_status</code> and <code>txpool_content</code> (Geth-specific
-            RPC namespace).
-          </p>
-          <CaptureButton targetId="panel-mempool" />
-        </div>
-        <pre className="mt-3 overflow-auto max-h-96 text-xs bg-black/40 p-3 rounded-lg border border-white/10">
-          {mempool ? JSON.stringify(mempool, null, 2) : "Click the button above."}
-        </pre>
-        <p className="text-white/60 text-sm mt-2">
-          Tip: live feeds use WebSocket <code>eth_subscribe("newPendingTransactions")</code>.
-        </p>
-      </Panel>
-
-      <Panel id="panel-received" title="Builders → Relays (builder_blocks_received)">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-          <p className="text-white/70">
-            Shows which builders are submitting payloads to relays—this activity lives outside your execution client.
-          </p>
-          <CaptureButton targetId="panel-received" />
-        </div>
-        <pre className="mt-3 overflow-auto max-h-96 text-xs bg-black/40 p-3 rounded-lg border border-white/10">
-          {received ? JSON.stringify(received, null, 2) : "Click the button."}
-        </pre>
-      </Panel>
-
-      <Panel id="panel-delivered" title="Relays → Validators (proposer_payload_delivered)">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-          <p className="text-white/70">
-            Delivers show which payload ultimately reached the proposer, including total value and transaction counts.
-          </p>
-          <CaptureButton targetId="panel-delivered" />
-        </div>
-        <pre className="mt-3 overflow-auto max-h-96 text-xs bg-black/40 p-3 rounded-lg border border-white/10">
-          {delivered ? JSON.stringify(delivered, null, 2) : "Click the button."}
-        </pre>
-      </Panel>
-
-      <Panel id="panel-headers" title="Proposed blocks (beacon headers)">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-          <p className="text-white/70">
-            Consensus-layer head headers expose proposers and the canonical chain tip for the latest slots.
-          </p>
-          <CaptureButton targetId="panel-headers" />
-        </div>
-        <pre className="mt-3 overflow-auto max-h-96 text-xs bg-black/40 p-3 rounded-lg border border-white/10">
-          {headers ? JSON.stringify(headers, null, 2) : "Click the button."}
-        </pre>
-      </Panel>
-
-      <Panel id="panel-finality" title="Finality checkpoints (Casper-FFG)">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-          <p className="text-white/70">
-            Finalized and justified checkpoints show when proposals become irreversible under Casper-FFG.
-          </p>
-          <CaptureButton targetId="panel-finality" />
-        </div>
-        <pre className="mt-3 overflow-auto max-h-96 text-xs bg-black/40 p-3 rounded-lg border border-white/10">
-          {finality ? JSON.stringify(finality, null, 2) : "Click the button."}
-        </pre>
-      </Panel>
-
-      <Panel id="panel-sandwich" title="MEV: Sandwich detector (Uniswap V2/V3 heuristic)">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-          <div className="md:w-2/3 text-white/70">
-            Scans a block for swaps where the same address wraps a victim trade in the same pool. Attackers are tinted
-            orange, victims yellow—purely educational and not production-grade forensics.
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              value={mevBlock}
-              onChange={(event) => setMevBlock(event.target.value)}
-              placeholder="latest or 0x..."
-              aria-label="Block number or tag"
-              className="bg-black/40 border border-white/10 rounded px-2 py-1 text-sm"
-            />
-            <GlowButton ariaLabel="Analyze block" onClick={async () => {
-              const target = mevBlock || "latest";
-              const result = await safeFetch(`/api/mev/sandwich?block=${encodeURIComponent(target)}`);
-              if (result) {
-                setMev(result);
-              }
-            }}>
-              Analyze
-            </GlowButton>
-            <CaptureButton targetId="panel-sandwich" />
-          </div>
-        </div>
-        <div className="mt-3 text-white/70 text-sm">
-          Use the transaction tracker above to inspect any highlighted hashes for inclusion, relay involvement, and
-          finality.
-        </div>
-        <div className="mt-3 overflow-auto max-h-[28rem] border border-white/10 rounded-lg">
-          {mev?.data?.sandwiches?.length ? (
-            <table className="w-full text-xs">
-              <thead className="bg-black/40 sticky top-0">
-                <tr>
-                  <th className="text-left p-2">Pool</th>
-                  <th className="text-left p-2">Attacker</th>
-                  <th className="text-left p-2">Victim</th>
-                  <th className="text-left p-2">Transactions (pre / victim / post)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {mev.data.sandwiches.map((row: Any, idx: number) => (
-                  <tr key={`${row.pool}-${idx}`} className="border-t border-white/10">
-                    <td className="p-2">{row.pool}</td>
-                    <td className="p-2">{row.attacker}</td>
-                    <td className="p-2">{row.victim}</td>
-                    <td className="p-2">
-                      <div className="flex flex-col gap-1">
-                        {[row.preTx, row.victimTx, row.postTx].map((hash: string, index: number) => (
-                          <code
-                            key={`${hash}-${index}`}
-                            className={`block px-2 py-1 rounded border ${highlightTx(hash)}`}
-                          >
-                            {hash}
-                          </code>
-                        ))}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          {trackLoading ? (
+            <p className="text-white/60">Loading transaction data...</p>
+          ) : tracked ? (
+            <pre>{JSON.stringify(tracked, null, 2)}</pre>
           ) : (
-            <pre className="text-xs bg-black/40 p-3">
-              {mev ? JSON.stringify(mev, null, 2) : "Run an analysis with the button above."}
-            </pre>
+            <p className="text-white/60">Enter a hash and click Track. {error ? "Check the error message above." : ""}</p>
           )}
         </div>
       </Panel>
+
+      {activePanel === "mempool" && (
+        <Panel id="panel-mempool" title="Mempool (public txs seen by your Geth)">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+            <p className="text-white/70">
+              Execution-layer mempool data from <code>txpool_status</code> and <code>txpool_content</code> (Geth-specific
+              RPC namespace).
+            </p>
+            <CaptureButton targetId="panel-mempool" />
+          </div>
+          <pre className="mt-3 overflow-auto max-h-96 text-xs bg-black/40 p-3 rounded-lg border border-white/10">
+            {mempool ? JSON.stringify(mempool, null, 2) : "Loading..."}
+          </pre>
+          <p className="text-white/60 text-sm mt-2">
+            Tip: live feeds use WebSocket <code>eth_subscribe("newPendingTransactions")</code>.
+          </p>
+        </Panel>
+      )}
+
+      {activePanel === "received" && (
+        <Panel id="panel-received" title="Builders → Relays (builder_blocks_received)">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+            <p className="text-white/70">
+              Shows which builders are submitting payloads to relays—this activity lives outside your execution client.
+            </p>
+            <CaptureButton targetId="panel-received" />
+          </div>
+          <pre className="mt-3 overflow-auto max-h-96 text-xs bg-black/40 p-3 rounded-lg border border-white/10">
+            {received ? JSON.stringify(received, null, 2) : "Loading..."}
+          </pre>
+        </Panel>
+      )}
+
+      {activePanel === "delivered" && (
+        <Panel id="panel-delivered" title="Relays → Validators (proposer_payload_delivered)">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+            <p className="text-white/70">
+              Delivers show which payload ultimately reached the proposer, including total value and transaction counts.
+            </p>
+            <CaptureButton targetId="panel-delivered" />
+          </div>
+          <pre className="mt-3 overflow-auto max-h-96 text-xs bg-black/40 p-3 rounded-lg border border-white/10">
+            {delivered ? JSON.stringify(delivered, null, 2) : "Loading..."}
+          </pre>
+        </Panel>
+      )}
+
+      {activePanel === "headers" && (
+        <Panel id="panel-headers" title="Proposed blocks + Builder payments">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+            <p className="text-white/70">
+              Consensus-layer head headers with builder payment data, gas usage, and block utilization metrics.
+            </p>
+            <CaptureButton targetId="panel-headers" />
+          </div>
+          <pre className="mt-3 overflow-auto max-h-96 text-xs bg-black/40 p-3 rounded-lg border border-white/10">
+            {headers ? JSON.stringify(headers, null, 2) : "Loading..."}
+          </pre>
+        </Panel>
+      )}
+
+      {activePanel === "finality" && (
+        <Panel id="panel-finality" title="Finality checkpoints (Casper-FFG)">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+            <p className="text-white/70">
+              Finalized and justified checkpoints show when proposals become irreversible under Casper-FFG.
+            </p>
+            <CaptureButton targetId="panel-finality" />
+          </div>
+          <pre className="mt-3 overflow-auto max-h-96 text-xs bg-black/40 p-3 rounded-lg border border-white/10">
+            {finality ? JSON.stringify(finality, null, 2) : "Loading..."}
+          </pre>
+        </Panel>
+      )}
+
+      {activePanel === "mev" && (
+        <Panel id="panel-sandwich" title="MEV: Sandwich detector (Uniswap V2/V3 heuristic)">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <div className="md:w-2/3 text-white/70">
+              Scans a block for swaps where the same address wraps a victim trade in the same pool. Attackers are tinted
+              orange, victims yellow—purely educational and not production-grade forensics.
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                value={mevBlock}
+                onChange={(event) => setMevBlock(event.target.value)}
+                placeholder="latest or 0x..."
+                aria-label="Block number or tag"
+                className="bg-black/40 border border-white/10 rounded px-2 py-1 text-sm"
+              />
+              <GlowButton ariaLabel="Analyze block" onClick={async () => {
+                const target = mevBlock || "latest";
+                const result = await safeFetch(`/api/mev/sandwich?block=${encodeURIComponent(target)}`);
+                if (result) {
+                  setMev(result);
+                }
+              }}>
+                Analyze
+              </GlowButton>
+              <CaptureButton targetId="panel-sandwich" />
+            </div>
+          </div>
+          <div className="mt-3 text-white/70 text-sm">
+            Use the transaction tracker above to inspect any highlighted hashes for inclusion, relay involvement, and
+            finality.
+          </div>
+          <div className="mt-3 overflow-auto max-h-[28rem] border border-white/10 rounded-lg">
+            {mev?.data?.sandwiches?.length ? (
+              <table className="w-full text-xs">
+                <thead className="bg-black/40 sticky top-0">
+                  <tr>
+                    <th className="text-left p-2">Pool</th>
+                    <th className="text-left p-2">Attacker</th>
+                    <th className="text-left p-2">Victim</th>
+                    <th className="text-left p-2">Transactions (pre / victim / post)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {mev.data.sandwiches.map((row: Any, idx: number) => (
+                    <tr key={`${row.pool}-${idx}`} className="border-t border-white/10">
+                      <td className="p-2">{row.pool}</td>
+                      <td className="p-2">{row.attacker}</td>
+                      <td className="p-2">{row.victim}</td>
+                      <td className="p-2">
+                        <div className="flex flex-col gap-1">
+                          {[row.preTx, row.victimTx, row.postTx].map((hash: string, index: number) => (
+                            <code
+                              key={`${hash}-${index}`}
+                              className={`block px-2 py-1 rounded border ${highlightTx(hash)}`}
+                            >
+                              {hash}
+                            </code>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <pre className="text-xs bg-black/40 p-3">
+                {mev ? JSON.stringify(mev, null, 2) : "Run an analysis with the button above."}
+              </pre>
+            )}
+          </div>
+        </Panel>
+      )}
 
       <Panel id="panel-wrap" title="Wrap-up: how a tx becomes finalized">
         <ol className="list-decimal pl-5 space-y-1 text-white/80">

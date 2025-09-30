@@ -1,3 +1,4 @@
+# start-go-api.sh
 #!/bin/bash
 
 set -euo pipefail
@@ -18,10 +19,11 @@ else
   echo "No .env.local found at repo root; using defaults."
 fi
 
-echo "Starting Go API server on localhost:8080..."
+ADDR_TO_USE=${GOAPI_ADDR:-:8081}
+echo "Starting Go API server on ${ADDR_TO_USE}..."
 cd "$SCRIPT_DIR/go-api"
 
 echo "Using RPC_HTTP_URL=${RPC_HTTP_URL:-(default)}"
 echo "Using RELAY_URLS=${RELAY_URLS:-(default)}"
 
-go run .
+GOAPI_ADDR="$ADDR_TO_USE" go run .

@@ -1,3 +1,4 @@
+// sandwich.go
 package main
 
 import (
@@ -5,8 +6,9 @@ import (
     "encoding/json"
     "net/http"
     "sort"
+    "strconv"
     "strings"
-    
+
     "golang.org/x/crypto/sha3"
 )
 
@@ -59,8 +61,23 @@ var (
     swapTopicV3 = strings.ToLower(keccakTopic("Swap(address,address,int256,int256,uint160,uint128,int24)"))
 )
 
+var sandwichMaxTx = func() int {
+    s := envOr("SANDWICH_MAX_TX", "120")
+    n, err := strconv.Atoi(s)
+    if err != nil {
+        return 120
+    }
+    if n < 10 {
+        n = 10
+    }
+    if n > 1000 {
+        n = 1000
+    }
+    return n
+}()
+
 func fetchBlockFull(tag string) (*block, error) {
-    raw, err := rpcCall("eth_getBlockByNumber", []interface{}{tag, true})
+    raw, err := rpcCall("eth_getBlockByNumber", []any{tag, true})
     if err != nil {
         return nil, err
     }
@@ -72,7 +89,7 @@ func fetchBlockFull(tag string) (*block, error) {
 }
 
 func fetchReceipt(txHash string) (*receipt, error) {
-    raw, err := rpcCall("eth_getTransactionReceipt", []interface{}{txHash})
+    raw, err := rpcCall("eth_getTransactionReceipt", []any{txHash})
     if err != nil {
         return nil, err
     }
@@ -85,7 +102,12 @@ func fetchReceipt(txHash string) (*receipt, error) {
 
 func collectSwaps(b *block) ([]swapEvent, error) {
     var swaps []swapEvent
-    for idx, tx := range b.Transactions {
+    maxN := len(b.Transactions)
+    if sandwichMaxTx < maxN {
+        maxN = sandwichMaxTx
+    }
+    for idx := 0; idx < maxN; idx++ {
+        tx := b.Transactions[idx]
         rcpt, err := fetchReceipt(tx.Hash)
         if err != nil || rcpt == nil {
             continue
