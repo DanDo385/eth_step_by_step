@@ -43,7 +43,7 @@ The Next.js app uses the App Router pattern:
 Always use the provided scripts which handle environment loading:
 
 ```bash
-# Start Go API server (runs on :8081 by default, or GOAPI_ADDR from .env.local)
+# Start Go API server (runs on :8080 by default, or GOAPI_ADDR from .env.local)
 ./start-go-api.sh
 
 # Start Next.js development server (runs on :3000 by default, or WEB_PORT from .env.local)
@@ -75,7 +75,7 @@ Configuration is handled through `.env.local` at the repository root. Key variab
 - `BEACON_API_URL`: Beacon chain API endpoint
 - `RELAY_URLS`: Comma-separated list of MEV relay endpoints
 - `WEB_PORT`: Next.js development server port (default: 3000)
-- `GOAPI_ADDR`: Go API server address (default: :8081)
+- `GOAPI_ADDR`: Go API server address (default: :8080)
 - `GOAPI_ORIGIN`: Go API origin for CORS (should match GOAPI_ADDR)
 
 ## Key Dependencies
@@ -123,7 +123,7 @@ The main application uses React state with useEffect hooks for data fetching. Th
 ## Port Configuration
 
 Default ports:
-- Go API: `:8081` (configurable via `GOAPI_ADDR`)
+- Go API: `:8080` (configurable via `GOAPI_ADDR`)
 - Next.js: `:3000` (configurable via `WEB_PORT`)
 
 Both start scripts check for port conflicts and load configuration from `.env.local`.

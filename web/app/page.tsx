@@ -1,4 +1,6 @@
 // web/app/page.tsx
+// Main page for the Ethereum transaction flow visualizer.
+// Shows how transactions go from mempool → MEV auction → block proposal → finality.
 "use client";
 
 import React, { useMemo, useState } from "react";
@@ -14,6 +16,7 @@ type Any = any;
 type ErrState = { title: string; message?: string; hint?: string } | null;
 
 export default function Page() {
+  // State for each data panel - mempool, relays, beacon, etc
   const [mempool, setMempool] = useState<Any>(null);
   const [received, setReceived] = useState<Any>(null);
   const [delivered, setDelivered] = useState<Any>(null);
@@ -21,16 +24,20 @@ export default function Page() {
   const [finality, setFinality] = useState<Any>(null);
   const [mev, setMev] = useState<Any>(null);
   const [mevBlock, setMevBlock] = useState<string>("latest");
+  const [sources, setSources] = useState<Any>(null);
   const [trackHash, setTrackHash] = useState<string>("");
   const [tracked, setTracked] = useState<Any>(null);
   const [trackLoading, setTrackLoading] = useState(false);
   const [error, setError] = useState<ErrState>(null);
-  const [lastSnapAt, setLastSnapAt] = useState<number>(0);
-  const SNAP_TTL_MS = 30_000; // 30s client-side throttle
 
-  // Active panel - only one can be shown at a time
+  // Client-side throttle for snapshot endpoint to avoid hammering the API
+  const [lastSnapAt, setLastSnapAt] = useState<number>(0);
+  const SNAP_TTL_MS = 30_000; // wait 30s between snapshot calls
+
+  // Track which panel is currently open (only one at a time)
   const [activePanel, setActivePanel] = useState<string | null>(null);
 
+  // Compute which stages to highlight in the diagram based on active panel
   const stages = useMemo(
     () => ({
       mempool: activePanel === "mempool",
@@ -43,12 +50,16 @@ export default function Page() {
   );
 
 
+  // safeFetch wraps fetch with error handling and user-friendly messages
+  // All our API calls go through this to provide consistent error UX
   async function safeFetch(url: string, init?: RequestInit) {
     setError(null);
     try {
       const res = await fetch(url, init);
       const contentType = res.headers.get("content-type") || "";
       const isJSON = contentType.includes("application/json") || url.endsWith(".json");
+
+      // Handle non-JSON responses
       if (!isJSON) {
         if (!res.ok) {
           setError({ title: "Request failed", message: `${res.status} ${res.statusText}` });
@@ -56,13 +67,16 @@ export default function Page() {
         }
         return await res.text();
       }
+
       const payload = await res.json();
+
+      // Check for errors in the response
       if (!res.ok || payload?.error) {
         const errPayload = payload?.error ?? {};
-        // Show more helpful error messages
         let errorMessage = errPayload.message || `${res.status} ${res.statusText}`;
         let errorHint = errPayload.hint;
-        
+
+        // Translate technical errors into user-friendly messages
         if (errPayload.kind === "TXPOOL") {
           errorMessage = "Mempool data not available from public RPC";
           errorHint = "Public RPC providers may not expose txpool APIs. Try using a different RPC endpoint.";
@@ -73,7 +87,7 @@ export default function Page() {
           errorMessage = "Beacon API temporarily unavailable";
           errorHint = "Public beacon API may be rate limiting. Try again in a few minutes.";
         }
-        
+
         setError({
           title: errPayload.kind || "Request failed",
           message: errorMessage,
@@ -81,54 +95,71 @@ export default function Page() {
         });
         return null;
       }
+
       return payload;
     } catch (err) {
+      // Network errors, CORS issues, etc
       setError({
         title: "Network error",
         message: err instanceof Error ? err.message : String(err),
-        hint: "Ensure the Go API is reachable (default http://localhost:8081)"
+        hint: "Ensure the Go API is reachable (default http://localhost:8080)"
       });
       return null;
     }
   }
 
+  // loadSnapshot fetches a batch of data from the /api/snapshot endpoint.
+  // This is more efficient than hitting each endpoint individually since
+  // the Go server can parallelize the upstream calls and cache the result.
   async function loadSnapshot(includeSandwich = false, block?: string) {
-    // Client-side throttle to avoid excessive calls
+    // Throttle to avoid spamming the API when user clicks buttons rapidly
     const now = Date.now();
     if (now - lastSnapAt < SNAP_TTL_MS) {
-      return; // use existing state
+      return; // reuse existing state
     }
+
+    // Build query string for optional MEV analysis
     const qs = new URLSearchParams();
     if (includeSandwich) {
       qs.set("sandwich", "1");
       qs.set("block", block || mempool?.lastBlock || "latest");
     }
+
     const result = await safeFetch(`/api/snapshot${qs.toString() ? '?' + qs.toString() : ''}`);
     if (!result) return;
+
     const d = result.data ?? result;
-    // Mempool
+
+    // Update all our state from the snapshot response
     if (d.mempool) {
       setMempool(d.mempool);
     }
-    // Relays
+
     if (d.relays) {
       const receivedBlocks = d.relays.received ?? [];
       const deliveredPayloads = d.relays.delivered ?? [];
       setReceived({ data: { received_blocks: receivedBlocks, count: receivedBlocks.length } });
       setDelivered({ data: { delivered_payloads: deliveredPayloads, count: deliveredPayloads.length } });
     }
-    // Beacon
+
     if (d.beacon) {
       if (d.beacon.headers) setHeaders(d.beacon.headers);
       if (d.beacon.finality) setFinality(d.beacon.finality);
     }
-    // MEV (optional)
+
     if (d.mev) {
       setMev({ data: d.mev });
     }
+
+    if (d.sources) {
+      setSources(d.sources);
+    }
+
     setLastSnapAt(now);
   }
 
+  // highlightTx colors transactions in the MEV sandwich table
+  // Attacker txs (front-run/back-run) get orange, victims get yellow
   const highlightTx = (hash: string) => {
     const sandwiches: Any = mev?.data?.sandwiches;
     if (!sandwiches || !hash) {
@@ -137,13 +168,13 @@ export default function Page() {
     const lower = hash.toLowerCase();
     for (const sw of sandwiches as Any[]) {
       if (sw.preTx?.toLowerCase?.() === lower) {
-        return "bg-orange-300/20 border-orange-400/40";
+        return "bg-orange-300/20 border-orange-400/40"; // front-run tx
       }
       if (sw.victimTx?.toLowerCase?.() === lower) {
-        return "bg-yellow-300/20 border-yellow-400/40";
+        return "bg-yellow-300/20 border-yellow-400/40"; // victim tx
       }
       if (sw.postTx?.toLowerCase?.() === lower) {
-        return "bg-orange-300/20 border-orange-400/40";
+        return "bg-orange-300/20 border-orange-400/40"; // back-run tx
       }
     }
     return "";
@@ -335,6 +366,9 @@ export default function Page() {
             </p>
             <CaptureButton targetId="panel-mempool" />
           </div>
+          <div className="mt-2 text-xs text-white/60">
+            Feeds: WS {sources?.rpc_ws || 'unset'}; HTTP {sources?.rpc_http || 'unset'}{mempool?.source ? ` (source=${mempool.source})` : ''}
+          </div>
           <pre className="mt-3 overflow-auto max-h-96 text-xs bg-black/40 p-3 rounded-lg border border-white/10">
             {mempool ? JSON.stringify(mempool, null, 2) : "Loading..."}
           </pre>
@@ -352,6 +386,9 @@ export default function Page() {
             </p>
             <CaptureButton targetId="panel-received" />
           </div>
+          <div className="mt-2 text-xs text-white/60">
+            Relays (configured): {Array.isArray(sources?.relays) ? sources.relays.join(', ') : 'n/a'}
+          </div>
           <pre className="mt-3 overflow-auto max-h-96 text-xs bg-black/40 p-3 rounded-lg border border-white/10">
             {received ? JSON.stringify(received, null, 2) : "Loading..."}
           </pre>
@@ -365,6 +402,9 @@ export default function Page() {
               Delivers show which payload ultimately reached the proposer, including total value and transaction counts.
             </p>
             <CaptureButton targetId="panel-delivered" />
+          </div>
+          <div className="mt-2 text-xs text-white/60">
+            Relays (configured): {Array.isArray(sources?.relays) ? sources.relays.join(', ') : 'n/a'}
           </div>
           <pre className="mt-3 overflow-auto max-h-96 text-xs bg-black/40 p-3 rounded-lg border border-white/10">
             {delivered ? JSON.stringify(delivered, null, 2) : "Loading..."}
@@ -380,6 +420,9 @@ export default function Page() {
             </p>
             <CaptureButton targetId="panel-headers" />
           </div>
+          <div className="mt-2 text-xs text-white/60">
+            Beacon API: {sources?.beacon_api || 'unset'}
+          </div>
           <pre className="mt-3 overflow-auto max-h-96 text-xs bg-black/40 p-3 rounded-lg border border-white/10">
             {headers ? JSON.stringify(headers, null, 2) : "Loading..."}
           </pre>
@@ -393,6 +436,9 @@ export default function Page() {
               Finalized and justified checkpoints show when proposals become irreversible under Casper-FFG.
             </p>
             <CaptureButton targetId="panel-finality" />
+          </div>
+          <div className="mt-2 text-xs text-white/60">
+            Beacon API: {sources?.beacon_api || 'unset'}
           </div>
           <pre className="mt-3 overflow-auto max-h-96 text-xs bg-black/40 p-3 rounded-lg border border-white/10">
             {finality ? JSON.stringify(finality, null, 2) : "Loading..."}
@@ -426,6 +472,9 @@ export default function Page() {
               </GlowButton>
               <CaptureButton targetId="panel-sandwich" />
             </div>
+          </div>
+          <div className="mt-2 text-xs text-white/60">
+            RPC (block/receipts): {mev?.data?.sources?.rpc_http || sources?.rpc_http || 'unset'}
           </div>
           <div className="mt-3 text-white/70 text-sm">
             Use the transaction tracker above to inspect any highlighted hashes for inclusion, relay involvement, and

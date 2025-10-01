@@ -192,6 +192,7 @@ func handleSandwich(w http.ResponseWriter, r *http.Request) {
         "blockHash":  b.Hash,
         "swapCount":  len(swaps),
         "sandwiches": detectSandwiches(swaps, b.Number),
+        "sources":    sourcesInfo(),
         "note":       "Heuristic: same address swaps before and after a victim in the same pool (Uniswap V2/V3).",
     })
 }

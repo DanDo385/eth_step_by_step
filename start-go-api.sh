@@ -19,7 +19,7 @@ else
   echo "No .env.local found at repo root; using defaults."
 fi
 
-ADDR_TO_USE=${GOAPI_ADDR:-:8081}
+ADDR_TO_USE=${GOAPI_ADDR:-:8080}
 echo "Starting Go API server on ${ADDR_TO_USE}..."
 cd "$SCRIPT_DIR/go-api"
 

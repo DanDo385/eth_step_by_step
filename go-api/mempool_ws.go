@@ -1,4 +1,7 @@
 // mempool_ws.go
+// Monitors pending transactions using HTTP polling.
+// We use eth_getBlockByNumber("pending") which works with all RPC providers,
+// unlike WebSocket subscriptions which are not supported by most public providers.
 package main
 
 import (
@@ -6,39 +9,38 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/gorilla/websocket"
 )
 
+// PendingTx is a simplified view of a transaction before it's included in a block
 type PendingTx struct {
 	Hash      string  `json:"hash"`
 	From      string  `json:"from"`
-	To        *string `json:"to"`
-	Value     string  `json:"value"`
-	GasPrice  *string `json:"gasPrice"`
-	Gas       *string `json:"gas"`
-	Nonce     string  `json:"nonce"`
-	Input     string  `json:"input"`
-	Timestamp int64   `json:"timestamp"`
+	To        *string `json:"to"`        // can be null for contract creation
+	Value     string  `json:"value"`     // in wei, hex encoded
+	GasPrice  *string `json:"gasPrice"`  // legacy gas price
+	Gas       *string `json:"gas"`       // gas limit
+	Nonce     string  `json:"nonce"`     // sender's transaction count
+	Input     string  `json:"input"`     // calldata
+	Timestamp int64   `json:"timestamp"` // when we saw it
 }
 
+// MempoolData holds our current snapshot of pending transactions
 type MempoolData struct {
 	PendingTxs []PendingTx `json:"pendingTxs"`
 	Count      int         `json:"count"`
 	LastUpdate int64       `json:"lastUpdate"`
-	Source     string      `json:"source"`
+	Source     string      `json:"source"` // "ws", "http-polling", etc
 }
 
 var (
 	mempoolData  = MempoolData{PendingTxs: make([]PendingTx, 0), Source: "ws"}
-	mempoolMutex sync.RWMutex
+	mempoolMutex sync.RWMutex // protects mempoolData from concurrent access
 )
 
-// handleMempoolWS returns a snapshot of the last observed pending transactions via WS subscription
+// handleMempoolWS returns current mempool snapshot to the HTTP client
 func handleMempoolWS(w http.ResponseWriter, _ *http.Request) {
 	mempoolMutex.RLock()
 	data := mempoolData
@@ -46,7 +48,7 @@ func handleMempoolWS(w http.ResponseWriter, _ *http.Request) {
 	writeOK(w, data)
 }
 
-// GetMempoolData returns a copy of the current mempool data for use by other packages
+// GetMempoolData lets other parts of the code grab mempool state safely
 func GetMempoolData() MempoolData {
 	mempoolMutex.RLock()
 	data := mempoolData
@@ -54,14 +56,16 @@ func GetMempoolData() MempoolData {
 	return data
 }
 
-// startMempoolSubscription connects to RPC_WS_URL (if set) and subscribes to newPendingTransactions.
-// It collects basic tx details via eth_getTransactionByHash and keeps a small rolling buffer.
+// startMempoolSubscription kicks off our mempool monitoring.
+// We use HTTP polling instead of WebSocket because most public RPC providers
+// don't support the eth_subscribe("newPendingTransactions") method.
 func startMempoolSubscription() {
+	// Check if user explicitly disabled mempool monitoring
 	if d := strings.ToLower(envOr("MEMPOOL_DISABLE", "")); d == "1" || d == "true" || d == "yes" || d == "on" {
 		log.Println("mempool WS: disabled via MEMPOOL_DISABLE env")
 		mempoolMutex.Lock()
 		mempoolData.Source = "ws-disabled"
-		// Add mock data for demonstration when disabled
+		// Generate some fake data for demo purposes
 		mempoolData.Count = 10
 		mempoolData.LastUpdate = time.Now().Unix()
 		mockTxs := make([]PendingTx, 10)
@@ -79,126 +83,84 @@ func startMempoolSubscription() {
 		mempoolMutex.Unlock()
 		return
 	}
-	if rpcWS == "" {
-		log.Println("mempool WS: RPC_WS_URL not set; skipping subscription")
-		return
-	}
-	// Backoff tuning via env
-	maxBackoff := 300 * time.Second
-	if s := envOr("MEMPOOL_BACKOFF_MAX_SECONDS", ""); s != "" {
-		if n, err := strconv.Atoi(s); err == nil && n > 0 && n <= 1800 {
-			maxBackoff = time.Duration(n) * time.Second
-		}
-	}
-	backoff := 3 * time.Second
-	lastLog := time.Time{}
-	go func() {
-		for {
-			ok := dialAndConsume()
-			if ok {
-				// reset backoff after a successful session
-				backoff = 3 * time.Second
-			} else {
-				// exponential backoff up to max
-				backoff *= 2
-				if backoff > maxBackoff {
-					backoff = maxBackoff
-				}
-			}
-			// rate-limit logs to once every 30s to avoid spam
-			if time.Since(lastLog) > 30*time.Second {
-				log.Printf("mempool WS: reconnecting in %s\n", backoff)
-				lastLog = time.Now()
-			}
-			time.Sleep(backoff)
-		}
-	}()
+
+	// Use HTTP polling as our primary approach
+	// WebSocket would be nicer but doesn't work reliably with Infura/Alchemy
+	log.Println("mempool: starting HTTP polling for pending transactions")
+	go startHTTPPolling()
 }
 
-func dialAndConsume() bool {
-	c, resp, err := websocket.DefaultDialer.Dial(rpcWS, nil)
-	if err != nil {
-		// Include status code when available to help debugging provider limitations
-		if resp != nil {
-			log.Printf("mempool WS dial error: %v (status %s)\n", err, resp.Status)
-		} else {
-			log.Println("mempool WS dial error:", err)
-		}
-		// mark source as unavailable but keep endpoint working
-		mempoolMutex.Lock()
-		mempoolData.Source = "ws-unavailable"
-		mempoolMutex.Unlock()
-		return false
-	}
-	defer c.Close()
+// startHTTPPolling fetches the "pending" block every few seconds.
+// The pending block contains transactions that are waiting to be mined.
+// This works with all RPC providers, unlike WebSocket subscriptions.
+func startHTTPPolling() {
+	log.Println("mempool HTTP: starting polling of pending block")
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
 
-	// Subscribe to newPendingTransactions
-	sub := map[string]any{
-		"jsonrpc": "2.0",
-		"id":      1,
-		"method":  "eth_subscribe",
-		"params":  []any{"newPendingTransactions"},
-	}
-	if err := c.WriteJSON(sub); err != nil {
-		log.Println("mempool WS subscribe write error:", err)
-		return false
-	}
-
-	// Read ack
-	var ack map[string]any
-	if err := c.ReadJSON(&ack); err != nil {
-		log.Println("mempool WS subscribe read error:", err)
-		return false
-	}
-
-	// Consume notifications
-	for {
-		var msg struct {
-			Params struct {
-				Result string `json:"result"`
-			} `json:"params"`
-		}
-		if err := c.ReadJSON(&msg); err != nil {
-			log.Println("mempool WS read error:", err)
-			return false
-		}
-		hash := msg.Params.Result
-		if hash == "" {
+	for range ticker.C {
+		// Ask for the "pending" pseudo-block with full tx objects
+		raw, err := rpcCall("eth_getBlockByNumber", []any{"pending", true})
+		if err != nil {
+			log.Printf("mempool HTTP: failed to fetch pending block: %v\n", err)
 			continue
 		}
-		// Fetch tx details via HTTP RPC
-		raw, err := rpcCall("eth_getTransactionByHash", []any{hash})
-		if err != nil || string(raw) == "null" {
+
+		// Parse the block response
+		var block struct {
+			Transactions []struct {
+				Hash     string  `json:"hash"`
+				From     string  `json:"from"`
+				To       *string `json:"to"`
+				Value    string  `json:"value"`
+				GasPrice *string `json:"gasPrice"`
+				Gas      *string `json:"gas"`
+				Nonce    string  `json:"nonce"`
+				Input    string  `json:"input"`
+			} `json:"transactions"`
+		}
+
+		if err := json.Unmarshal(raw, &block); err != nil {
+			log.Printf("mempool HTTP: failed to parse pending block: %v\n", err)
 			continue
 		}
-		var t struct {
-			Hash     string  `json:"hash"`
-			From     string  `json:"from"`
-			To       *string `json:"to"`
-			Value    string  `json:"value"`
-			GasPrice *string `json:"gasPrice"`
-			Gas      *string `json:"gas"`
-			Nonce    string  `json:"nonce"`
-			Input    string  `json:"input"`
-		}
-		if err := json.Unmarshal(raw, &t); err != nil {
+
+		// Sometimes the pending block is empty, that's fine
+		if len(block.Transactions) == 0 {
 			continue
 		}
+
+		// Grab the first 10 transactions for display
+		limit := 10
+		if len(block.Transactions) < limit {
+			limit = len(block.Transactions)
+		}
+
 		now := time.Now().Unix()
-		pt := PendingTx{Hash: t.Hash, From: t.From, To: t.To, Value: t.Value, GasPrice: t.GasPrice, Gas: t.Gas, Nonce: t.Nonce, Input: t.Input, Timestamp: now}
-		mempoolMutex.Lock()
-		mempoolData.PendingTxs = append([]PendingTx{pt}, mempoolData.PendingTxs...)
-		// Keep only the most recent 10 transactions
-		if len(mempoolData.PendingTxs) > 10 {
-			mempoolData.PendingTxs = mempoolData.PendingTxs[:10]
+		pendingTxs := make([]PendingTx, limit)
+		for i := 0; i < limit; i++ {
+			tx := block.Transactions[i]
+			pendingTxs[i] = PendingTx{
+				Hash:      tx.Hash,
+				From:      tx.From,
+				To:        tx.To,
+				Value:     tx.Value,
+				GasPrice:  tx.GasPrice,
+				Gas:       tx.Gas,
+				Nonce:     tx.Nonce,
+				Input:     tx.Input,
+				Timestamp: now,
+			}
 		}
-		mempoolData.Count = len(mempoolData.PendingTxs)
+
+		// Update our shared state
+		mempoolMutex.Lock()
+		mempoolData.PendingTxs = pendingTxs
+		mempoolData.Count = len(pendingTxs)
 		mempoolData.LastUpdate = now
-		mempoolData.Source = "ws"
+		mempoolData.Source = "http-polling"
 		mempoolMutex.Unlock()
+
+		log.Printf("mempool HTTP: fetched %d pending transactions\n", len(pendingTxs))
 	}
-	// unreachable
-	// return true indicates a healthy loop which we don't reach here
-	// but keep for completeness
-	// return true
 }

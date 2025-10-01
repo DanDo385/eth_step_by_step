@@ -242,6 +242,7 @@ func handleSnapshot(w http.ResponseWriter, r *http.Request) {
 		"mempool":   mp,
 		"relays":    relaysData,
 		"beacon":    beaconData,
+		"sources":   sourcesInfo(),
 	}
 
 	if includeSandwich {
@@ -249,7 +250,7 @@ func handleSnapshot(w http.ResponseWriter, r *http.Request) {
 		mevCh := make(chan R, 1)
 		go func() {
 			b, err := fetchBlockFull(blockTag)
-			mev := R{}
+			var mev R
 			if err == nil && b != nil {
 				if swaps, err2 := collectSwaps(b); err2 == nil {
 					s := detectSandwiches(swaps, b.Number)

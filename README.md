@@ -56,7 +56,7 @@ An educational tool that visualizes the journey of Ethereum transactions from me
 
 4. **Access the application**:
    - **Web UI**: http://localhost:3000
-   - **Go API**: http://localhost:8081
+   - **Go API**: http://localhost:8080
 
 ### No Blockchain Sync Required!
 
@@ -149,13 +149,13 @@ Use `Ctrl+C` in each terminal to stop the services.
 
 ### Checking Service Status
 
-- Go API: http://localhost:8081/api/mempool
+- Go API: http://localhost:8080/api/mempool
 - Web UI: http://localhost:3000
 
 ### Port Conflicts
 
-If ports 3000 or 8081 are in use:
-- Go API: Set `GOAPI_ADDR` (or `PORT`) in `.env.local`, e.g. `GOAPI_ADDR=:8081`, and update `GOAPI_ORIGIN` accordingly (e.g. `http://localhost:8081`). Then restart the servers.
+If ports 3000 or 8080 are in use:
+- Go API: Set `GOAPI_ADDR` (or `PORT`) in `.env.local`, e.g. `GOAPI_ADDR=:8080`, and update `GOAPI_ORIGIN` accordingly (e.g. `http://localhost:8080`). Then restart the servers.
 - Web UI: Change the dev port in `web/package.json` scripts if needed.
 
 ## Contributing
