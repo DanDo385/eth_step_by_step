@@ -50,7 +50,11 @@ var relayBudget = func() time.Duration {
 func relayGET(path string) (json.RawMessage, error) {
 	// Short-circuit if we recently failed this path (negative cache)
 	if relayFailRecently(path) {
-		return nil, errors.New("relay recently failed; backing off")
+		err := errors.New("relay recently failed; backing off")
+		if relayHealth != nil {
+			relayHealth.SetError(err)
+		}
+		return nil, err
 	}
 	// Cache key is just the requested path (includes query string like ?limit=10)
 	if body, ok := relayCacheGet(path); ok {
@@ -95,12 +99,20 @@ func relayGET(path string) (json.RawMessage, error) {
 		}()
 		if body, ok := relayCacheGet(path); ok {
 			fmt.Printf("relay: success from %s after %s\n", base, time.Since(started))
+			// Update health status on success
+			if relayHealth != nil {
+				relayHealth.SetSuccess()
+			}
 			return body, nil
 		}
 	}
 	relayCacheMarkFail(path)
 	if lastErr != nil {
-		return nil, fmt.Errorf("all %d relays failed, last error: %w", len(relayBases), lastErr)
+		err := fmt.Errorf("all %d relays failed, last error: %w", len(relayBases), lastErr)
+		if relayHealth != nil {
+			relayHealth.SetError(err)
+		}
+		return nil, err
 	}
 	return nil, fmt.Errorf("all %d relays failed or timed out", len(relayBases))
 }

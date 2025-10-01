@@ -93,16 +93,33 @@ func rpcCall(method string, params any) (json.RawMessage, error) {
 	})
 	res, err := rpcHTTPClient.Post(rpcHTTP, "application/json", bytes.NewReader(payload))
 	if err != nil {
+		// Update health status on error
+		if rpcHealth != nil {
+			rpcHealth.SetError(err)
+		}
 		return nil, err
 	}
 	defer res.Body.Close()
 	body, _ := io.ReadAll(res.Body)
 	var parsed rpcResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
+		if rpcHealth != nil {
+			rpcHealth.SetError(err)
+		}
 		return nil, err
 	}
 	if parsed.Error != nil {
-		return nil, errors.New(parsed.Error.Message)
+		err := errors.New(parsed.Error.Message)
+		if rpcHealth != nil {
+			rpcHealth.SetError(err)
+		}
+		return nil, err
 	}
+
+	// Update health status on success
+	if rpcHealth != nil {
+		rpcHealth.SetSuccess()
+	}
+
 	return parsed.Result, nil
 }

@@ -243,11 +243,16 @@ func corsMiddleware(next http.Handler) http.Handler {
 }
 
 func main() {
+	// Initialize health monitoring for all data sources
+	initHealthSources()
+
 	// Kick off mempool monitoring in background
 	startMempoolSubscription()
 
 	// Set up all our routes
 	mux := http.NewServeMux()
+
+	// Data endpoints
 	mux.HandleFunc("/api/mempool", handleMempool)
 	mux.HandleFunc("/api/relays/delivered", handleRelaysDelivered)
 	mux.HandleFunc("/api/relays/received", handleRelaysReceived)
@@ -257,6 +262,11 @@ func main() {
 	mux.HandleFunc("/api/block/", handleBlock)
 	mux.HandleFunc("/api/mev/sandwich", handleSandwich)
 	mux.HandleFunc("/api/track/tx/", handleTrackTx) // follow a tx through its lifecycle
+
+	// Health check endpoints
+	mux.HandleFunc("/api/health", handleHealth)                // Detailed health status
+	mux.HandleFunc("/api/health/live", handleHealthLiveness)   // Liveness probe
+	mux.HandleFunc("/api/health/ready", handleHealthReadiness) // Readiness probe
 
 	// Check env for custom port
 	addr := envOr("GOAPI_ADDR", ":"+envOr("PORT", "8080"))

@@ -103,6 +103,10 @@ func startHTTPPolling() {
 		raw, err := rpcCall("eth_getBlockByNumber", []any{"pending", true})
 		if err != nil {
 			log.Printf("mempool HTTP: failed to fetch pending block: %v\n", err)
+			// Update health status on error
+			if mempoolHealth != nil {
+				mempoolHealth.SetError(err)
+			}
 			continue
 		}
 
@@ -160,6 +164,11 @@ func startHTTPPolling() {
 		mempoolData.LastUpdate = now
 		mempoolData.Source = "http-polling"
 		mempoolMutex.Unlock()
+
+		// Update health status on success
+		if mempoolHealth != nil {
+			mempoolHealth.SetSuccess()
+		}
 
 		log.Printf("mempool HTTP: fetched %d pending transactions\n", len(pendingTxs))
 	}
