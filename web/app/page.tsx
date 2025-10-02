@@ -168,12 +168,6 @@ export default function Page() {
 
   return (
     <main className="max-w-6xl mx-auto px-4 pb-12">
-      {/* Transaction Flow Diagram - Full Width */}
-      <div className="mb-8">
-        <h2 className="text-2xl font-semibold text-neon-blue mb-4 text-center">Transaction Flow</h2>
-        <MermaidDiagram stages={stages} />
-      </div>
-
       <header className="my-6 space-y-4">
         {/* Beginner-Friendly Introduction */}
         <div className="bg-gradient-to-br from-blue-500/10 to-purple-500/10 border border-blue-500/30 rounded-lg p-6 space-y-4">
@@ -469,6 +463,12 @@ export default function Page() {
         >
           6) Sandwich detector
         </GlowButton>
+      </div>
+
+      {/* Transaction Flow Diagram - Full Width */}
+      <div className="mb-8">
+        <h2 className="text-2xl font-semibold text-neon-blue mb-4 text-center">Transaction Flow</h2>
+        <MermaidDiagram stages={stages} />
       </div>
 
       <Panel id="panel-tracker" title="Track a transaction">
