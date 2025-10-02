@@ -4,7 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an educational Ethereum visualization tool that demonstrates the journey of transactions from mempool to finality. The system consists of a Go API backend and a Next.js frontend that work together to fetch and display real-time Ethereum data.
+This is an **educational Ethereum visualization tool** designed for complete beginners with zero cryptocurrency knowledge. It demonstrates the complete journey of transactions from mempool to finality using real-time Ethereum data.
+
+**Key Educational Features:**
+- Interactive glossary with 40+ terms organized by category
+- Step-by-step walkthrough explaining each visualization panel
+- Real-world analogies (post office, concert tickets, banks)
+- Detailed explanations of gas economics, MEV, validator earnings, and finality
+- Live MEV sandwich attack detection with victim/attacker visualization
+- Human-readable transaction tracking across execution and consensus layers
+
+The system consists of a Go API backend and a Next.js frontend that work together to fetch and display real-time Ethereum data with extensive educational commentary.
 
 ## Architecture
 
@@ -18,23 +28,32 @@ The project follows a clean separation between data fetching (Go) and presentati
 
 The Go backend is organized into specialized modules:
 
-- `main.go`: HTTP server with CORS handling and route definitions
+- `main.go`: HTTP server with CORS handling and route definitions for all API endpoints
 - `eth_rpc.go`: Ethereum JSON-RPC client for mempool and transaction data
-- `beacon.go`: Beacon chain API client for consensus layer data
-- `relay.go`: MEV relay client for PBS (Proposer-Builder Separation) data
-- `mempool_ws.go`: WebSocket-based mempool monitoring
-- `track_tx.go`: Transaction lifecycle tracking across all layers
-- `sandwich.go`: MEV sandwich attack detection using Uniswap heuristics
-- `snapshot.go`: Caching layer for API responses
+- `beacon.go`: Beacon chain API client for consensus layer data (validator headers, finality checkpoints)
+- `relay.go`: MEV relay client for PBS data (builder submissions, delivered payloads)
+- `mempool_ws.go`: WebSocket-based mempool monitoring with aggregate metrics (total gas, value, avg price, high-priority count)
+- `track_tx.go`: Transaction lifecycle tracking across execution and consensus layers
+- `sandwich.go`: MEV sandwich attack detection using Uniswap V2/V3 heuristics (front-run → victim → back-run patterns)
+- `snapshot.go`: Caching layer for API responses with fallback logic for relay endpoints
 
 ### Frontend Structure
 
-The Next.js app uses the App Router pattern:
+The Next.js app uses the App Router pattern with extensive educational components:
 
-- `app/page.tsx`: Main application with interactive Mermaid diagram
-- `app/components/`: React components including MermaidDiagram, Panels, Alerts
+- `app/page.tsx`: Main application with welcome introduction, step-by-step walkthrough, and interactive panels
+- `app/components/`: Specialized React components for each visualization:
+  - `Glossary.tsx`: Interactive glossary with 40+ terms in 5 categories (basics, lifecycle, MEV, economics, security)
+  - `TransactionView.tsx`: Human-readable transaction display with economics, MEV info, and finality tracking
+  - `BuilderRelayView.tsx`: Builder competition visualization showing all block submissions
+  - `RelayDeliveredView.tsx`: Winning blocks delivered to validators
+  - `BeaconHeadersView.tsx`: Proposed blocks with builder payments and validator earnings
+  - `FinalityView.tsx`: Casper-FFG finality checkpoints with health status
+  - `SandwichView.tsx`: MEV sandwich attack detection with step-by-step explanations
+  - `MermaidDiagram.tsx`: Transaction flow visualization
+- `app/utils/format.ts`: Data formatting utilities (hex→decimal, wei→ETH, gwei conversions, hash shortening)
 - `app/api/[...path]/route.ts`: API proxy to Go backend
-- Styling: Tailwind CSS with dark/light theme support
+- Styling: Tailwind CSS with dark theme and gradient accents
 
 ## Development Commands
 
@@ -87,38 +106,60 @@ Configuration is handled through `.env.local` at the repository root. Key variab
 ### Frontend Dependencies
 - `next`: Next.js 14 with App Router and TypeScript
 - `react` + `react-dom`: React 18
-- `tailwindcss`: Utility-first CSS framework
-- `react-tooltip`: Interactive tooltips for education
+- `tailwindcss`: Utility-first CSS framework for responsive design
+- `react-tooltip`: Interactive tooltips for glossary terms and educational content
 - `html2canvas`: Diagram export functionality
+- `mermaid`: Transaction flow diagram rendering
 
 ## API Endpoints
 
 The Go API exposes these educational endpoints:
 
-- `GET /api/mempool`: Real-time mempool data via WebSocket
-- `GET /api/relays/received`: Builder blocks received by relays
-- `GET /api/relays/delivered`: Payloads delivered to proposers
-- `GET /api/validators/head`: Beacon chain headers
-- `GET /api/finality`: Casper-FFG finality checkpoints
-- `GET /api/track/tx/{hash}`: Transaction lifecycle tracking
-- `GET /api/mev/sandwich?block={id}`: MEV sandwich detection
+- `GET /api/mempool`: Real-time mempool data with aggregate metrics (total gas, value, avg gas price, high-priority count)
+- `GET /api/relays/received`: Builder block submissions received by relays (shows all competing blocks for each slot)
+- `GET /api/relays/delivered`: Winning payloads delivered to validators (only blocks that won the auction)
+- `GET /api/validators/head`: Beacon chain block headers enriched with builder payments and MEV-Boost metadata
+- `GET /api/finality`: Casper-FFG finality checkpoints with justification and finalization status
+- `GET /api/track/tx/{hash}`: Complete transaction lifecycle tracking (mempool → block → finality)
+- `GET /api/mev/sandwich?block={id}`: MEV sandwich attack detection for specific block ("latest" or block number)
+- `GET /api/snapshot`: Aggregated data from all sources with caching
 
 ## Common Development Patterns
 
 ### Adding New API Endpoints
 
 1. Add handler function in `go-api/main.go`
-2. Implement data fetching logic in appropriate module (eth_rpc.go, beacon.go, etc.)
+2. Implement data fetching logic in appropriate module (eth_rpc.go, beacon.go, relay.go, etc.)
 3. Use `writeOK()` and `writeErr()` helpers for consistent JSON responses
-4. Add frontend integration in `web/app/page.tsx`
+4. Create or update React component in `web/app/components/` with educational content
+5. Add frontend integration in `web/app/page.tsx` with appropriate panel button
+6. Include detailed educational explanations, analogies, and metric cards
 
 ### Working with Real-time Data
 
-The system uses WebSocket connections for live mempool data and implements caching for expensive API calls. Check `mempool_ws.go` and `snapshot.go` for patterns.
+The system uses WebSocket connections for live mempool data and implements caching for expensive API calls:
+- `mempool_ws.go`: WebSocket connection with fallback to HTTP polling, includes `calculateMempoolMetrics()` for aggregate statistics
+- `snapshot.go`: Caches relay data with fallback logic (tries `builder_blocks_received` first, then `proposer_payload_delivered`)
+- All endpoints include error handling for rate limits and unavailable data sources
 
 ### Frontend State Management
 
-The main application uses React state with useEffect hooks for data fetching. The interactive diagram updates based on API responses and user interactions.
+The main application uses React state with useEffect hooks for data fetching:
+- Each panel (mempool, builder relay, delivered, headers, finality, sandwich) has dedicated state
+- Data is fetched from Go API and transformed using `app/utils/format.ts` utilities
+- Educational components include summary metrics, detailed explanations, and human-readable tables
+- All monetary values converted from wei/gwei to ETH, all hex values converted to decimal
+
+### Educational Content Guidelines
+
+When adding new features or components:
+- **Always include beginner-friendly explanations** with real-world analogies
+- **Use metric cards** with gradients and color-coding for key statistics
+- **Provide context** about why things matter and how they impact users
+- **Show the math** - explain calculations for gas fees, validator earnings, etc.
+- **Add tooltips** to glossary terms and technical concepts
+- **Use visual hierarchy** - important insights in colored boxes with icons
+- **Explain edge cases** - what happens during congestion, rate limiting, etc.
 
 ## Port Configuration
 

@@ -35,6 +35,7 @@ export default function Page() {
   const [trackHash, setTrackHash] = useState<string>("");
   const [tracked, setTracked] = useState<Any>(null);
   const [trackLoading, setTrackLoading] = useState(false);
+  const [trackDetailsHidden, setTrackDetailsHidden] = useState(false);
   const [error, setError] = useState<ErrState>(null);
 
   // Client-side throttle for snapshot endpoint to avoid hammering the API
@@ -219,7 +220,7 @@ export default function Page() {
 
             <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4">
               <h3 className="font-semibold text-yellow-300 mb-2 flex items-center gap-2">
-                <span className="text-xl">📚</span> Complete Beginner? Start Here:
+                Complete Beginner? Start Here:
               </h3>
               <div className="text-sm space-y-2">
                 <p><strong className="text-white">Ethereum</strong> = A global computer network where people can send digital money (ETH) and run programs</p>
@@ -255,7 +256,7 @@ export default function Page() {
       {/* Step-by-Step Walkthrough Guide */}
       <div className="my-6 bg-gradient-to-br from-green-500/10 to-cyan-500/10 border border-green-500/30 rounded-lg p-6">
         <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-          <span className="text-2xl">🎯</span> How to Use This Tool - Beginner's Guide
+          How to Use This Tool - Beginner's Guide
         </h3>
 
         <div className="space-y-4 text-sm">
@@ -360,7 +361,7 @@ export default function Page() {
             <p className="text-white/90 text-sm">
               Don't worry if some terms are confusing at first! Hover over highlighted terms in the glossary (right sidebar) for instant definitions.
               Each panel has detailed explanations with real-world analogies. Take your time exploring each section - this is complex stuff,
-              but understanding it gives you superpowers in the crypto world! 🚀
+              but understanding it gives you superpowers in the crypto world!
             </p>
           </div>
         </div>
@@ -470,7 +471,7 @@ export default function Page() {
         </GlowButton>
       </div>
 
-      <Panel id="panel-tracker" title="Track a transaction (personalized)">
+      <Panel id="panel-tracker" title="Track a transaction">
         <p className="text-white/70">
           Enter a transaction hash to stitch together its journey: execution inclusion, relay bidtraces, and an
           approximate finality check using beacon checkpoints.
@@ -490,25 +491,42 @@ export default function Page() {
             }
             setTracked(null);
             setTrackLoading(true);
+            setTrackDetailsHidden(false); // Show details when tracking new transaction
             const result = await safeFetch(`/api/track/tx/${trackHash}`);
             setTrackLoading(false);
             if (result) {
-              setTracked(result);
+              // Unwrap API envelope if present
+              setTracked(result.data ?? result);
             }
           }}>
             Track
           </GlowButton>
+          {tracked && (
+            <GlowButton
+              ariaLabel={trackDetailsHidden ? "Show transaction details" : "Hide transaction details"}
+              onClick={() => setTrackDetailsHidden(!trackDetailsHidden)}
+            >
+              {trackDetailsHidden ? "Unhide" : "Hide"}
+            </GlowButton>
+          )}
           <CaptureButton targetId="panel-tracker" />
         </div>
-        <div className="mt-3 overflow-auto max-h-96 text-xs bg-black/40 p-3 rounded-lg border border-white/10">
-          {trackLoading ? (
-            <p className="text-white/60">Loading transaction data...</p>
-          ) : tracked ? (
-            <TransactionView data={tracked} />
-          ) : (
-            <p className="text-white/60">Enter a hash and click Track. {error ? "Check the error message above." : ""}</p>
-          )}
-        </div>
+        {!trackDetailsHidden && (
+          <div className="mt-3 overflow-auto max-h-96 text-xs bg-black/40 p-3 rounded-lg border border-white/10">
+            {trackLoading ? (
+              <p className="text-white/60">Loading transaction data...</p>
+            ) : tracked ? (
+              <TransactionView data={tracked} />
+            ) : (
+              <p className="text-white/60">Enter a hash and click Track. {error ? "Check the error message above." : ""}</p>
+            )}
+          </div>
+        )}
+        {trackDetailsHidden && tracked && (
+          <div className="mt-3 p-3 bg-black/20 border border-white/10 rounded-lg text-center">
+            <p className="text-white/60 text-sm">Transaction details hidden. Click "Unhide" to view.</p>
+          </div>
+        )}
       </Panel>
 
       {activePanel === "mempool" && (

@@ -1,4 +1,9 @@
-// BuilderRelayView - Displays builder blocks received by relays (MEV auction submissions)
+/*
+ * BuilderRelayView.tsx
+ * Shows all the blocks that builders submitted to MEV relays for a given slot.
+ * This is the competition phase - multiple builders bid for the same slot, but only one wins.
+ * Helps explain why transaction counts seem inflated (same txs in multiple competing blocks).
+ */
 import React from 'react';
 import { weiToEth, hexToNumber, formatNumber, shortenHash, getBuilderName, slotToTime } from '../utils/format';
 

@@ -1,4 +1,9 @@
-// BeaconHeadersView - Displays proposed blocks with builder payment enrichment
+/*
+ * BeaconHeadersView.tsx
+ * Shows proposed blocks enriched with MEV-Boost builder payment data.
+ * Explains validator economics: base rewards + transaction tips + builder payments.
+ * Separates MEV-Boost blocks (built by professionals) from vanilla blocks (built locally).
+ */
 import React from 'react';
 import { weiToEth, hexToNumber, formatNumber, shortenHash, getBuilderName, slotToEpoch } from '../utils/format';
 

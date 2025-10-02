@@ -1,4 +1,9 @@
-// TransactionView - Displays transaction data in a structured, human-readable format
+/*
+ * TransactionView.tsx
+ * Human-readable display of a single transaction's complete lifecycle.
+ * Shows economics (gas fees, value), MEV/PBS data (builder, relay), and finality journey.
+ * Converts all hex values to decimal and wei/gwei to ETH for readability.
+ */
 import React from 'react';
 import { weiToEth, hexToGwei, hexToNumber, shortenHash, formatNumber, slotToEpoch } from '../utils/format';
 
@@ -14,6 +19,7 @@ export default function TransactionView({ data }: TransactionViewProps) {
   const economics = data.economics;
   const beacon = data.beacon;
   const pbsRelay = data.pbs_relay;
+  const decoded = data.decoded;
 
   return (
     <div className="space-y-4 text-sm">
@@ -21,6 +27,11 @@ export default function TransactionView({ data }: TransactionViewProps) {
       <div className="border-l-4 border-blue-500 pl-4">
         <h3 className="font-semibold text-white mb-2 flex items-center gap-2">
           📊 Transaction Overview
+          {decoded?.action_type && (
+            <span className="ml-2 px-2 py-0.5 bg-blue-500/20 text-blue-300 text-xs rounded">
+              {decoded.action_type.toUpperCase()}
+            </span>
+          )}
         </h3>
         <div className="space-y-1 text-white/80">
           <div className="flex justify-between">
@@ -53,8 +64,273 @@ export default function TransactionView({ data }: TransactionViewProps) {
             <span className="text-white/60">Value:</span>
             <span className="font-medium">{weiToEth(economics?.value || '0x0')} ETH</span>
           </div>
+
+          {/* Transaction-Type Specific Fields */}
+          {decoded?.action_type === 'swap' && decoded.details?.swap_from_amount_formatted && (
+            <>
+              <div className="border-t border-white/10 my-2 pt-2">
+                <div className="text-white/60 text-xs mb-1">Swap Details:</div>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-white/60">From:</span>
+                <span className="font-medium text-purple-400">
+                  {decoded.details.swap_from_amount_formatted} {decoded.details.swap_from_token_name || 'tokens'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-white/60">To:</span>
+                <span className="font-medium text-green-400">
+                  {decoded.details.swap_to_amount_formatted} {decoded.details.swap_to_token_name || 'tokens'}
+                </span>
+              </div>
+              {decoded.details.price_per_token && (
+                <div className="flex justify-between">
+                  <span className="text-white/60">Exchange Rate:</span>
+                  <span className="text-xs">{decoded.details.price_per_token}</span>
+                </div>
+              )}
+            </>
+          )}
+
+          {decoded?.action_type === 'transfer' && decoded.details?.amount_wei && (
+            <>
+              <div className="border-t border-white/10 my-2 pt-2">
+                <div className="text-white/60 text-xs mb-1">Transfer Details:</div>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-white/60">Amount:</span>
+                <span className="font-medium">{weiToEth(decoded.details.amount_wei as string)} tokens</span>
+              </div>
+              {decoded.details.recipient && (
+                <div className="flex justify-between">
+                  <span className="text-white/60">Recipient:</span>
+                  <span className="font-mono text-xs">{shortenHash(decoded.details.recipient as string)}</span>
+                </div>
+              )}
+            </>
+          )}
+
+          {decoded?.action_type === 'transferFrom' && decoded.details?.amount_wei && (
+            <>
+              <div className="border-t border-white/10 my-2 pt-2">
+                <div className="text-white/60 text-xs mb-1">Transfer Details:</div>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-white/60">Amount:</span>
+                <span className="font-medium">{weiToEth(decoded.details.amount_wei as string)} tokens</span>
+              </div>
+              {decoded.details.from && (
+                <div className="flex justify-between">
+                  <span className="text-white/60">From:</span>
+                  <span className="font-mono text-xs">{shortenHash(decoded.details.from as string)}</span>
+                </div>
+              )}
+              {decoded.details.to && (
+                <div className="flex justify-between">
+                  <span className="text-white/60">To:</span>
+                  <span className="font-mono text-xs">{shortenHash(decoded.details.to as string)}</span>
+                </div>
+              )}
+            </>
+          )}
+
+          {decoded?.action_type === 'approve' && decoded.details?.amount_wei && (
+            <>
+              <div className="border-t border-white/10 my-2 pt-2">
+                <div className="text-white/60 text-xs mb-1">Approval Details:</div>
+              </div>
+              {decoded.details.spender && (
+                <div className="flex justify-between">
+                  <span className="text-white/60">Spender:</span>
+                  <span className="font-mono text-xs">{shortenHash(decoded.details.spender as string)}</span>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <span className="text-white/60">Amount:</span>
+                <span className="font-medium">
+                  {decoded.details.unlimited ? (
+                    <span className="text-yellow-400">Unlimited ⚠️</span>
+                  ) : (
+                    weiToEth(decoded.details.amount_wei as string) + ' tokens'
+                  )}
+                </span>
+              </div>
+            </>
+          )}
+
+          {(decoded?.action_type === 'deposit' || decoded?.action_type === 'withdraw') && (
+            <>
+              <div className="border-t border-white/10 my-2 pt-2">
+                <div className="text-white/60 text-xs mb-1">{decoded.action_type === 'deposit' ? 'Deposit' : 'Withdraw'} Details:</div>
+              </div>
+              {decoded.details?.amount_wei && (
+                <div className="flex justify-between">
+                  <span className="text-white/60">Amount:</span>
+                  <span className="font-medium">{weiToEth(decoded.details.amount_wei as string)} tokens/ETH</span>
+                </div>
+              )}
+              {decoded.details?.eth_amount && (
+                <div className="flex justify-between">
+                  <span className="text-white/60">ETH Amount:</span>
+                  <span className="font-medium">{weiToEth(decoded.details.eth_amount as string)} ETH</span>
+                </div>
+              )}
+            </>
+          )}
+
+          {decoded?.action_type === 'mint' && (
+            <>
+              <div className="border-t border-white/10 my-2 pt-2">
+                <div className="text-white/60 text-xs mb-1">Mint Details:</div>
+              </div>
+              {decoded.details?.to_address && (
+                <div className="flex justify-between">
+                  <span className="text-white/60">Recipient:</span>
+                  <span className="font-mono text-xs">{shortenHash(decoded.details.to_address as string)}</span>
+                </div>
+              )}
+              {decoded.details?.amount && (
+                <div className="flex justify-between">
+                  <span className="text-white/60">Amount:</span>
+                  <span className="font-medium">{weiToEth(decoded.details.amount as string)}</span>
+                </div>
+              )}
+            </>
+          )}
+
+          {decoded?.action_type === 'claim' && decoded.details?.claimed_amount && (
+            <>
+              <div className="border-t border-white/10 my-2 pt-2">
+                <div className="text-white/60 text-xs mb-1">Claim Details:</div>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-white/60">Claimed:</span>
+                <span className="font-medium text-green-400">{weiToEth(decoded.details.claimed_amount as string)} {decoded.details.claimed_token_name || 'tokens'}</span>
+              </div>
+            </>
+          )}
+
+          {decoded?.action_type === 'execute' && decoded.details?.target && (
+            <>
+              <div className="border-t border-white/10 my-2 pt-2">
+                <div className="text-white/60 text-xs mb-1">Execute Details:</div>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-white/60">Target:</span>
+                <span className="font-mono text-xs">{shortenHash(decoded.details.target as string)}</span>
+              </div>
+            </>
+          )}
         </div>
       </div>
+
+      {/* Decoded Transaction Section */}
+      {decoded && (
+        <div className="border-l-4 border-indigo-500 pl-4">
+          <h3 className="font-semibold text-white mb-2 flex items-center gap-2">
+            🔍 What This Transaction Does
+          </h3>
+          <div className="space-y-2 text-white/80">
+            <div className="flex justify-between items-start">
+              <span className="text-white/60">Action:</span>
+              <span className="font-medium text-indigo-400">{decoded.action}</span>
+            </div>
+
+            {decoded.contract_type && (
+              <div className="flex justify-between items-start">
+                <span className="text-white/60">Contract:</span>
+                <span className="text-white">{decoded.contract_type}</span>
+              </div>
+            )}
+
+            {decoded.method_name && (
+              <div className="flex justify-between items-start">
+                <span className="text-white/60">Method:</span>
+                <span className="font-mono text-xs text-purple-400">{decoded.method_name}</span>
+              </div>
+            )}
+
+            {decoded.details?.description && (
+              <div className="mt-2 p-2 bg-indigo-500/10 border border-indigo-500/20 rounded text-sm">
+                {decoded.details.description}
+              </div>
+            )}
+
+            {/* Token Transfers */}
+            {decoded.details?.transfers && Array.isArray(decoded.details.transfers) && (
+              <div className="mt-3">
+                <div className="text-white/60 text-xs mb-2">Token Transfers ({decoded.details.transfer_count}):</div>
+                <div className="space-y-2">
+                  {(decoded.details.transfers as any[]).map((transfer: any, idx: number) => (
+                    <div key={idx} className="bg-white/5 rounded p-2 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-white/60">Token:</span>
+                        <span className="font-medium">{transfer.token_name || shortenHash(transfer.token)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-white/60">Amount:</span>
+                        <span>{weiToEth(transfer.amount)} tokens</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-white/60">From:</span>
+                        <span className="font-mono">{shortenHash(transfer.from)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-white/60">To:</span>
+                        <span className="font-mono">{shortenHash(transfer.to)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Swap Details */}
+            {decoded.details?.swap_type && (
+              <div className="mt-2 p-2 bg-purple-500/10 border border-purple-500/20 rounded text-xs">
+                <div className="font-medium text-purple-400 mb-1">DEX Swap Detected</div>
+                <div className="text-white/80">
+                  Type: {decoded.details.swap_type === 'eth_to_token' ? 'ETH → Token' : 'Token Swap'}
+                </div>
+                {decoded.details.eth_in && (
+                  <div className="text-white/80">
+                    ETH In: {weiToEth(decoded.details.eth_in as string)} ETH
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Approval Details */}
+            {decoded.details?.spender && (
+              <div className="mt-2 space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-white/60">Spender:</span>
+                  <span className="font-mono text-xs">{shortenHash(decoded.details.spender as string)}</span>
+                </div>
+                {decoded.details.amount_wei && !decoded.details.unlimited && (
+                  <div className="flex justify-between">
+                    <span className="text-white/60">Amount:</span>
+                    <span>{weiToEth(decoded.details.amount_wei as string)} tokens</span>
+                  </div>
+                )}
+                {decoded.details.unlimited && (
+                  <div className="p-2 bg-yellow-500/10 border border-yellow-500/20 rounded text-xs text-yellow-400">
+                    ⚠️ Unlimited approval granted
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Recipient for transfers */}
+            {decoded.details?.recipient && (
+              <div className="flex justify-between">
+                <span className="text-white/60">Recipient:</span>
+                <span className="font-mono text-xs">{shortenHash(decoded.details.recipient as string)}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Economics Section */}
       <div className="border-l-4 border-green-500 pl-4">

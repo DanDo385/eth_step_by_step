@@ -1,4 +1,8 @@
-// FinalityView - Displays Casper FFG finality checkpoints
+/*
+ * FinalityView.tsx
+ * Displays Casper-FFG finality checkpoints - the mechanism that makes transactions irreversible.
+ * Shows justification → finalization process and explains why exchanges wait ~15 minutes for deposits.
+ */
 import React from 'react';
 import { hexToNumber, formatNumber, slotToEpoch, slotToTime } from '../utils/format';
 

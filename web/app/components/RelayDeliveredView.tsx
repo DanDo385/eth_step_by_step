@@ -1,4 +1,9 @@
-// RelayDeliveredView - Displays winning blocks delivered from relays to validators
+/*
+ * RelayDeliveredView.tsx
+ * Shows the WINNING blocks that relays actually delivered to validators.
+ * These are the blocks that won the MEV auction and got proposed on-chain.
+ * Compare with BuilderRelayView to see which bids lost the auction.
+ */
 import React from 'react';
 import { weiToEth, hexToNumber, formatNumber, shortenHash, getBuilderName, slotToTime } from '../utils/format';
 

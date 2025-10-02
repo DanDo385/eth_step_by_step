@@ -1,13 +1,15 @@
-# start-web.sh
 #!/bin/bash
+# start-web.sh
+# Starts the Next.js frontend (the educational web interface).
+# This talks to the Go API backend to fetch and display live Ethereum data.
 
 set -euo pipefail
 
-# Resolve repo root regardless of where the script is run from
+# Figure out where we are so we can find .env.local and the web folder
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$SCRIPT_DIR"
 
-# Load environment variables from .env.local if present (repo root)
+# Load config from .env.local if it exists (mainly for custom port)
 ENV_FILE="$REPO_ROOT/.env.local"
 if [[ -f "$ENV_FILE" ]]; then
   echo "Loading environment from $ENV_FILE"
@@ -19,15 +21,17 @@ else
   echo "No .env.local found at repo root; using defaults."
 fi
 
-# Determine desired web port (defaults to 3000). Fail if busy to encourage freeing 3000.
+# Default to port 3000 (standard Next.js port)
 DESIRED_PORT=${WEB_PORT:-3000}
+
+# Check if the port is already in use - better to fail fast than silently use a different port
 if lsof -nP -iTCP:${DESIRED_PORT} -sTCP:LISTEN >/dev/null 2>&1; then
   echo "ERROR: Port ${DESIRED_PORT} is in use. Please free it or set WEB_PORT to a different port in .env.local."
   exit 1
 fi
 
-# Start the Next.js web server
+# Fire up Next.js in development mode
 echo "Starting Next.js web server on localhost:${DESIRED_PORT}..."
 cd "$SCRIPT_DIR/web"
-# Use local Next.js binary directly so we can pass the chosen port
+# Use npx to run the local Next.js binary with our chosen port
 npx next dev -p "${DESIRED_PORT}"

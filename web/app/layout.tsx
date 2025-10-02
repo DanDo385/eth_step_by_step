@@ -3,7 +3,11 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Ethereum Visualizer",
-  description: "Mempool → PBS → Finality learning tool"
+  description: "Mempool → PBS → Finality learning tool",
+  icons: {
+    icon: "/favicon.ico",
+    shortcut: "/favicon.ico",
+  }
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

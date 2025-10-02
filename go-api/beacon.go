@@ -1,4 +1,6 @@
 // beacon.go
+// Connects to the Ethereum consensus layer (beacon chain) to get block proposals,
+// finality checkpoints, and other PoS-related data.
 package main
 
 import (
@@ -12,26 +14,31 @@ import (
 	"time"
 )
 
+// beaconBase is the URL for our beacon chain API (consensus layer)
 var beaconBase = envOr("BEACON_API_URL", "https://beacon.prylabs.net")
 
+// beaconGET fetches data from the beacon API with caching and health monitoring
 func beaconGET(path string) (json.RawMessage, int, error) {
+	// Check cache first - beacon data doesn't change super fast
 	if body, status, ok := beaconCacheGet(path); ok {
 		return body, status, nil
 	}
+
 	url := strings.TrimRight(beaconBase, "/") + path
 	resp, err := beaconHTTPClient.Get(url)
 	if err != nil {
-		// Update health status on error
+		// Network error - update health monitor
 		if beaconHealth != nil {
 			beaconHealth.SetError(err)
 		}
 		return nil, 0, err
 	}
 	defer resp.Body.Close()
+
 	body, _ := io.ReadAll(resp.Body)
 	beaconCacheSet(path, json.RawMessage(body), resp.StatusCode)
 
-	// Update health status on success
+	// Track health based on HTTP status
 	if beaconHealth != nil && resp.StatusCode/100 == 2 {
 		beaconHealth.SetSuccess()
 	} else if beaconHealth != nil {
@@ -41,7 +48,8 @@ func beaconGET(path string) (json.RawMessage, int, error) {
 	return json.RawMessage(body), resp.StatusCode, nil
 }
 
-// --- simple in-memory cache for beaconGET ---
+// === Beacon API caching ===
+// Same idea as relay caching - reduce load on public beacon APIs which rate limit heavily
 
 type beaconEntry struct {
 	body    json.RawMessage
@@ -68,22 +76,29 @@ var (
 	}()
 )
 
+// beaconCacheGet returns cached response if still valid
 func beaconCacheGet(key string) (json.RawMessage, int, bool) {
 	now := time.Now()
 	beaconMu.RLock()
 	e, ok := beaconMemo[key]
 	beaconMu.RUnlock()
+
+	// Still fresh? Use it
 	if ok && now.Before(e.expires) {
 		return e.body, e.status, true
 	}
+
+	// Expired? Clean it up
 	if ok {
 		beaconMu.Lock()
 		delete(beaconMemo, key)
 		beaconMu.Unlock()
 	}
+
 	return nil, 0, false
 }
 
+// HTTP client for beacon API calls with timeout
 var beaconHTTPClient = &http.Client{Timeout: func() time.Duration {
 	if s := envOr("UPSTREAM_TIMEOUT_SECONDS", ""); s != "" {
 		if n, err := strconv.Atoi(s); err == nil && n > 0 && n <= 30 {
@@ -93,8 +108,10 @@ var beaconHTTPClient = &http.Client{Timeout: func() time.Duration {
 	return 3 * time.Second
 }()}
 
+// beaconCacheSet stores a response (successful or error) with appropriate TTL
 func beaconCacheSet(key string, body json.RawMessage, status int) {
 	beaconMu.Lock()
+	// Use shorter TTL for errors so we retry sooner
 	ttl := beaconOkTTL
 	if status/100 != 2 {
 		ttl = beaconErrTTL

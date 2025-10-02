@@ -68,16 +68,21 @@ func handleTrackTx(w http.ResponseWriter, r *http.Request) {
         "hash":       t.Hash,
         "from":       t.From,
         "to":         t.To,
+        "input":      t.Input,
         "economics":  economics,
         "status":     map[string]any{"pending": pending},
         "pbs_relay":  nil,
         "beacon":     nil,
+        "decoded":    nil,
     }
+
+    var rawReceipt json.RawMessage
 
     // Get receipt for actual gas used and status
     if !pending {
-        rawReceipt, err := rpcCall("eth_getTransactionReceipt", []any{t.Hash})
-        if err == nil && string(rawReceipt) != "null" {
+        receiptData, err := rpcCall("eth_getTransactionReceipt", []any{t.Hash})
+        if err == nil && string(receiptData) != "null" {
+            rawReceipt = receiptData
             var receipt struct {
                 Status          string `json:"status"`
                 GasUsed         string `json:"gasUsed"`
@@ -92,6 +97,12 @@ func handleTrackTx(w http.ResponseWriter, r *http.Request) {
                 }
             }
         }
+    }
+
+    // Decode transaction input to understand what it's doing
+    decoded := decodeTransactionInput(t.Input, t.To, t.Value, rawReceipt)
+    if decoded != nil {
+        resp["decoded"] = decoded
     }
 
     if !pending && t.BlockNumber != nil {

@@ -1,4 +1,9 @@
-// SandwichView - Displays MEV sandwich attack detection results
+/*
+ * SandwichView.tsx
+ * Detects and displays MEV sandwich attacks in Ethereum blocks.
+ * Shows front-run → victim → back-run sequences where searchers profit from sandwich victims.
+ * Real attacks happening on mainnet right now - educational for understanding MEV impact.
+ */
 import React from 'react';
 import { weiToEth, hexToNumber, formatNumber, shortenHash } from '../utils/format';
 

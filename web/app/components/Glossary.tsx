@@ -1,3 +1,8 @@
+/*
+ * Glossary.tsx
+ * Interactive glossary component with 40+ Ethereum terms organized by category.
+ * Uses react-tooltip to show definitions on hover. Perfect for beginners learning crypto concepts.
+ */
 "use client";
 
 import "react-tooltip/dist/react-tooltip.css";
