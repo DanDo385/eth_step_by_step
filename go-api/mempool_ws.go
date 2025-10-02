@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/big"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,12 +29,21 @@ type PendingTx struct {
 	Timestamp int64   `json:"timestamp"` // when we saw it
 }
 
+// MempoolMetrics provides aggregated stats about pending transactions
+type MempoolMetrics struct {
+	TotalGasRequested uint64  `json:"totalGasRequested"` // sum of gas limits
+	TotalValueWei     string  `json:"totalValueWei"`     // sum of transaction values (hex)
+	AvgGasPrice       float64 `json:"avgGasPrice"`       // average gas price in gwei
+	HighPriorityCount int     `json:"highPriorityCount"` // txs paying >50 gwei
+}
+
 // MempoolData holds our current snapshot of pending transactions
 type MempoolData struct {
-	PendingTxs []PendingTx `json:"pendingTxs"`
-	Count      int         `json:"count"`
-	LastUpdate int64       `json:"lastUpdate"`
-	Source     string      `json:"source"` // "ws", "http-polling", etc
+	PendingTxs []PendingTx     `json:"pendingTxs"`
+	Count      int             `json:"count"`
+	LastUpdate int64           `json:"lastUpdate"`
+	Source     string          `json:"source"` // "ws", "http-polling", etc
+	Metrics    *MempoolMetrics `json:"metrics,omitempty"`
 }
 
 var (
@@ -88,6 +99,63 @@ func startMempoolSubscription() {
 	// WebSocket would be nicer but doesn't work reliably with Infura/Alchemy
 	log.Println("mempool: starting HTTP polling for pending transactions")
 	go startHTTPPolling()
+}
+
+// calculateMempoolMetrics computes aggregate stats from pending transactions
+func calculateMempoolMetrics(txs []PendingTx) *MempoolMetrics {
+	if len(txs) == 0 {
+		return nil
+	}
+
+	metrics := &MempoolMetrics{}
+	var totalGasPrice uint64
+	var gasPriceCount int
+	totalValue := big.NewInt(0)
+
+	for _, tx := range txs {
+		// Sum gas requested
+		if tx.Gas != nil {
+			if gas, err := strconv.ParseUint(strings.TrimPrefix(*tx.Gas, "0x"), 16, 64); err == nil {
+				metrics.TotalGasRequested += gas
+			}
+		}
+
+		// Sum transaction values
+		if tx.Value != "" && tx.Value != "0x" && tx.Value != "0x0" {
+			if val, ok := new(big.Int).SetString(strings.TrimPrefix(tx.Value, "0x"), 16); ok {
+				totalValue.Add(totalValue, val)
+			}
+		}
+
+		// Calculate average gas price and count high priority
+		var gasPrice uint64
+		if tx.GasPrice != nil && *tx.GasPrice != "" {
+			if gp, err := strconv.ParseUint(strings.TrimPrefix(*tx.GasPrice, "0x"), 16, 64); err == nil {
+				gasPrice = gp
+			}
+		}
+
+		if gasPrice > 0 {
+			totalGasPrice += gasPrice
+			gasPriceCount++
+
+			// Count high priority (>50 gwei = 50 * 1e9 wei)
+			if gasPrice > 50_000_000_000 {
+				metrics.HighPriorityCount++
+			}
+		}
+	}
+
+	// Store total value as hex
+	metrics.TotalValueWei = "0x" + totalValue.Text(16)
+
+	// Calculate average gas price in gwei
+	if gasPriceCount > 0 {
+		avgWei := totalGasPrice / uint64(gasPriceCount)
+		metrics.AvgGasPrice = float64(avgWei) / 1e9 // convert to gwei
+	}
+
+	return metrics
 }
 
 // startHTTPPolling fetches the "pending" block every few seconds.
@@ -157,12 +225,16 @@ func startHTTPPolling() {
 			}
 		}
 
+		// Calculate metrics
+		metrics := calculateMempoolMetrics(pendingTxs)
+
 		// Update our shared state
 		mempoolMutex.Lock()
 		mempoolData.PendingTxs = pendingTxs
 		mempoolData.Count = len(pendingTxs)
 		mempoolData.LastUpdate = now
 		mempoolData.Source = "http-polling"
+		mempoolData.Metrics = metrics
 		mempoolMutex.Unlock()
 
 		// Update health status on success
@@ -170,6 +242,7 @@ func startHTTPPolling() {
 			mempoolHealth.SetSuccess()
 		}
 
-		log.Printf("mempool HTTP: fetched %d pending transactions\n", len(pendingTxs))
+		log.Printf("mempool HTTP: fetched %d pending transactions (avg gas: %.2f gwei)\n",
+			len(pendingTxs), metrics.AvgGasPrice)
 	}
 }

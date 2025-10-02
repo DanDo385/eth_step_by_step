@@ -126,8 +126,14 @@ func handleSnapshot(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		var out []R
-		// Note: builder_blocks_received endpoint often returns empty or is unavailable
-		// Use delivered payloads as a proxy for received blocks since they're the same data
+		// Try builder_blocks_received first (shows all submissions)
+		if raw, err := relayGET(fmt.Sprintf("/relay/v1/data/bidtraces/builder_blocks_received?limit=%d", limit)); err == nil && raw != nil {
+			if err := json.Unmarshal(raw, &out); err == nil && len(out) > 0 {
+				recCh <- out
+				return
+			}
+		}
+		// Fallback: Use delivered payloads as a proxy for received blocks
 		if raw, err := relayGET(fmt.Sprintf("/relay/v1/data/bidtraces/proposer_payload_delivered?limit=%d", limit)); err == nil && raw != nil {
 			_ = json.Unmarshal(raw, &out)
 		}
