@@ -1,4 +1,19 @@
 // snapshot.go
+//
+// This file implements a "snapshot" endpoint that aggregates data from multiple sources
+// (mempool, relays, beacon chain) into a single HTTP response. Think of it as a dashboard
+// API - instead of making 5 separate requests, the frontend can call /api/snapshot once
+// and get everything it needs.
+//
+// The clever bit: we cache the results for 30 seconds (configurable) to avoid hammering
+// the upstream APIs. Public APIs like Flashbots relays and Beaconcha.in have rate limits,
+// and we don't want to get banned! Caching also makes the frontend MUCH faster since we're
+// not waiting for 5 different external API calls every time someone refreshes the page.
+//
+// Architecture note: We fetch from multiple APIs in PARALLEL using goroutines, then wait
+// for all of them to finish (with a timeout). This is way faster than fetching sequentially.
+// If one API is slow or down, we don't want to block the whole response.
+
 package main
 
 import (
@@ -11,52 +26,88 @@ import (
 	"time"
 )
 
-// Aggregated snapshot endpoint that consolidates multiple upstream calls.
-// Results are cached for SNAPSHOT_TTL_SECONDS (default 30s) to reduce rate limits.
-
+// snapshotEntry represents a cached snapshot response with an expiration time.
+// We store the full JSON bytes (not the parsed object) because it's faster to just
+// write the bytes directly to the HTTP response without re-marshaling.
 type snapshotEntry struct {
-	body    []byte
-	expires time.Time
+	body    []byte    // The full JSON response body
+	expires time.Time // When this cache entry becomes stale
 }
 
 var (
-	snapshotMu   sync.RWMutex
+	// snapshotMu protects the snapshotMemo cache from concurrent reads/writes.
+	// We use RWMutex because reads are way more common than writes (many users, one cache update per TTL).
+	snapshotMu sync.RWMutex
+
+	// snapshotMemo is our in-memory cache. Key is built from query params (limit, sandwich, block).
+	// This is super simple caching - production apps would use Redis or Memcached, but for an
+	// educational tool, a map works fine!
 	snapshotMemo = map[string]snapshotEntry{}
-	snapshotTTL  = func() time.Duration {
-		// Prefer explicit snapshot TTL, fallback to CACHE_TTL_SECONDS, default 30s
+
+	// snapshotTTL is how long we cache snapshots before refetching. Default is 30 seconds.
+	// Why 30s? It balances freshness with API rate limits. Ethereum blocks come every 12s,
+	// so 30s means we might be showing data that's ~2-3 blocks old. That's fine for education.
+	//
+	// You can override with SNAPSHOT_TTL_SECONDS or CACHE_TTL_SECONDS env vars.
+	// Max is 10 minutes (600s) to prevent showing super stale data.
+	snapshotTTL = func() time.Duration {
+		// Prefer explicit snapshot TTL
 		if s := envOr("SNAPSHOT_TTL_SECONDS", ""); s != "" {
 			if n, err := strconv.Atoi(s); err == nil && n > 0 && n <= 600 {
 				return time.Duration(n) * time.Second
 			}
 		}
+		// Fallback to generic cache TTL
 		if s := envOr("CACHE_TTL_SECONDS", ""); s != "" {
 			if n, err := strconv.Atoi(s); err == nil && n > 0 && n <= 600 {
 				return time.Duration(n) * time.Second
 			}
 		}
+		// Default: 30 seconds is the sweet spot
 		return 30 * time.Second
 	}()
 )
 
+// snapshotCacheGet checks if we have a fresh cached response for this key.
+// Returns (cachedBody, true) if cache hit, (nil, false) if cache miss or expired.
+//
+// Thread-safe: uses RLock for reads (multiple goroutines can read simultaneously).
+// If the entry is expired, we delete it and return a miss. This keeps the cache clean.
 func snapshotCacheGet(key string) ([]byte, bool) {
 	now := time.Now()
+
+	// Acquire read lock - allows concurrent reads but blocks writes
 	snapshotMu.RLock()
 	e, ok := snapshotMemo[key]
 	snapshotMu.RUnlock()
+
+	// Check if we found an entry and if it's still fresh
 	if ok && now.Before(e.expires) {
-		return e.body, true
+		return e.body, true // Cache hit! Return the cached bytes
 	}
+
+	// Entry exists but is expired - clean it up
 	if ok {
-		snapshotMu.Lock()
+		snapshotMu.Lock() // Need write lock to delete
 		delete(snapshotMemo, key)
 		snapshotMu.Unlock()
 	}
-	return nil, false
+
+	return nil, false // Cache miss
 }
 
+// snapshotCacheSet stores a snapshot response in the cache with a TTL.
+// Thread-safe: uses Lock for writes (only one goroutine can write at a time).
+//
+// Note: We don't do cache eviction (removing old entries to save memory). For a production
+// app you'd want an LRU cache or periodic cleanup. But for this educational tool, the cache
+// will stay small (at most a few dozen entries) so we don't worry about it.
 func snapshotCacheSet(key string, body []byte) {
-	snapshotMu.Lock()
-	snapshotMemo[key] = snapshotEntry{body: body, expires: time.Now().Add(snapshotTTL)}
+	snapshotMu.Lock() // Acquire write lock - blocks all other reads/writes
+	snapshotMemo[key] = snapshotEntry{
+		body:    body,
+		expires: time.Now().Add(snapshotTTL), // Set expiration time
+	}
 	snapshotMu.Unlock()
 }
 
